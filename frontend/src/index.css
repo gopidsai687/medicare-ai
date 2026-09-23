@@ -1,0 +1,398 @@
+@import "tailwindcss";
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   MediCare Design System
+   Dark-mode first, glassmorphism, deep medical blue/teal palette
+───────────────────────────────────────────────────────────────────────────── */
+
+@theme {
+  /* Typography */
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Outfit", ui-sans-serif, system-ui, sans-serif;
+
+  /* Brand palette */
+  --color-brand-50:  #eef6ff;
+  --color-brand-100: #d9ecff;
+  --color-brand-200: #bbdcfe;
+  --color-brand-300: #8cc4fd;
+  --color-brand-400: #57a3f9;
+  --color-brand-500: #3182f4;
+  --color-brand-600: #1a63e9;
+  --color-brand-700: #134ccc;
+  --color-brand-800: #1540a6;
+  --color-brand-900: #163883;
+
+  /* Teal accent */
+  --color-teal-400: #2dd4bf;
+  --color-teal-500: #14b8a6;
+  --color-teal-600: #0d9488;
+
+  /* Emerald for success / vitals */
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+
+  /* Amber for warnings */
+  --color-amber-400: #fbbf24;
+  --color-amber-500: #f59e0b;
+
+  /* Rose for critical / danger */
+  --color-rose-400: #fb7185;
+  --color-rose-500: #f43f5e;
+
+  /* Dark surface palette */
+  --color-surface-950: #050c1a;
+  --color-surface-900: #0a1628;
+  --color-surface-800: #0f2040;
+  --color-surface-700: #152a55;
+  --color-surface-600: #1e3a6e;
+  --color-surface-500: #2a4d85;
+
+  /* Glass / border */
+  --color-glass-border: rgba(255, 255, 255, 0.08);
+  --color-glass-bg: rgba(15, 32, 64, 0.6);
+}
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: #050c1a;
+  color: #e2eaf4;
+  min-height: 100vh;
+  margin: 0;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(49, 130, 244, 0.3); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(49, 130, 244, 0.6); }
+
+/* ── Glassmorphism card ───────────────────────────────────────────────────── */
+.glass {
+  background: rgba(15, 32, 64, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+}
+
+.glass-sm {
+  background: rgba(15, 32, 64, 0.4);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 10px;
+}
+
+/* ── Gradient text ────────────────────────────────────────────────────────── */
+.gradient-text {
+  background: linear-gradient(135deg, #57a3f9 0%, #2dd4bf 60%, #34d399 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* ── Animated gradient background ────────────────────────────────────────── */
+.bg-animated {
+  background: radial-gradient(ellipse at 20% 50%, rgba(49, 130, 244, 0.15) 0%, transparent 50%),
+              radial-gradient(ellipse at 80% 20%, rgba(45, 212, 191, 0.12) 0%, transparent 45%),
+              radial-gradient(ellipse at 60% 80%, rgba(52, 211, 153, 0.08) 0%, transparent 40%),
+              #050c1a;
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────────────────── */
+.sidebar {
+  background: rgba(10, 22, 40, 0.9);
+  backdrop-filter: blur(20px);
+  border-right: 1px solid rgba(255, 255, 255, 0.06);
+  width: 256px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  position: fixed;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 40;
+  transition: transform 0.3s ease;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: #8fa8c8;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-decoration: none;
+  margin: 2px 8px;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(49, 130, 244, 0.12);
+  color: #b8d0f0;
+}
+
+.sidebar-nav-item.active {
+  background: linear-gradient(135deg, rgba(49, 130, 244, 0.2), rgba(45, 212, 191, 0.1));
+  color: #57a3f9;
+  border: 1px solid rgba(49, 130, 244, 0.2);
+}
+
+.sidebar-nav-item.active svg {
+  color: #57a3f9;
+}
+
+.sidebar-section-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3a5070;
+  padding: 16px 24px 6px;
+}
+
+/* ── TopBar ───────────────────────────────────────────────────────────────── */
+.topbar {
+  background: rgba(10, 22, 40, 0.8);
+  backdrop-filter: blur(20px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  height: 64px;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  position: sticky;
+  top: 0;
+  z-index: 30;
+}
+
+/* ── Stat card ────────────────────────────────────────────────────────────── */
+.stat-card {
+  background: rgba(15, 32, 64, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: 14px;
+  padding: 20px 24px;
+  transition: all 0.25s ease;
+  cursor: default;
+}
+
+.stat-card:hover {
+  border-color: rgba(49, 130, 244, 0.25);
+  transform: translateY(-2px);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.btn-primary {
+  background: linear-gradient(135deg, #3182f4, #1a63e9);
+  color: white;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: none;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  box-shadow: 0 4px 15px rgba(49, 130, 244, 0.35);
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, #57a3f9, #3182f4);
+  box-shadow: 0 6px 20px rgba(49, 130, 244, 0.5);
+  transform: translateY(-1px);
+}
+
+.btn-secondary {
+  background: rgba(49, 130, 244, 0.1);
+  color: #57a3f9;
+  font-weight: 500;
+  padding: 10px 20px;
+  border-radius: 10px;
+  border: 1px solid rgba(49, 130, 244, 0.25);
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.btn-secondary:hover {
+  background: rgba(49, 130, 244, 0.18);
+  border-color: rgba(49, 130, 244, 0.4);
+}
+
+/* ── Input ────────────────────────────────────────────────────────────────── */
+.input-field {
+  background: rgba(15, 32, 64, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  color: #e2eaf4;
+  padding: 11px 14px;
+  font-size: 0.875rem;
+  width: 100%;
+  outline: none;
+  transition: all 0.2s ease;
+  font-family: var(--font-sans);
+}
+
+.input-field:focus {
+  border-color: rgba(49, 130, 244, 0.5);
+  box-shadow: 0 0 0 3px rgba(49, 130, 244, 0.12);
+}
+
+.input-field::placeholder {
+  color: #3a5070;
+}
+
+/* ── Badge ────────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.badge-blue   { background: rgba(49, 130, 244, 0.15); color: #57a3f9; border: 1px solid rgba(49,130,244,0.2); }
+.badge-teal   { background: rgba(20, 184, 166, 0.15); color: #2dd4bf; border: 1px solid rgba(20,184,166,0.2); }
+.badge-green  { background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16,185,129,0.2); }
+.badge-amber  { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245,158,11,0.2); }
+.badge-rose   { background: rgba(244,  63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244,63,94,0.2); }
+.badge-gray   { background: rgba(255, 255, 255, 0.06); color: #8fa8c8; border: 1px solid rgba(255,255,255,0.1); }
+
+/* ── Table ────────────────────────────────────────────────────────────────── */
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.data-table th {
+  text-align: left;
+  padding: 12px 16px;
+  color: #3a5070;
+  font-weight: 600;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.data-table td {
+  padding: 14px 16px;
+  color: #c0d4ed;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.data-table tr:hover td {
+  background: rgba(49, 130, 244, 0.04);
+}
+
+/* ── Animations ───────────────────────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(49, 130, 244, 0.2); }
+  50%       { box-shadow: 0 0 40px rgba(49, 130, 244, 0.45); }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.animate-fade-in-up { animation: fadeInUp 0.4s ease both; }
+.animate-fade-in    { animation: fadeIn 0.3s ease both; }
+.animate-pulse-glow { animation: pulse-glow 3s ease-in-out infinite; }
+
+/* Stagger children */
+.stagger > *:nth-child(1) { animation-delay: 0ms; }
+.stagger > *:nth-child(2) { animation-delay: 60ms; }
+.stagger > *:nth-child(3) { animation-delay: 120ms; }
+.stagger > *:nth-child(4) { animation-delay: 180ms; }
+.stagger > *:nth-child(5) { animation-delay: 240ms; }
+.stagger > *:nth-child(6) { animation-delay: 300ms; }
+
+/* ── Skeleton loader ──────────────────────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(255,255,255,0.04) 25%,
+    rgba(255,255,255,0.08) 50%,
+    rgba(255,255,255,0.04) 75%
+  );
+  background-size: 200% auto;
+  animation: shimmer 1.5s linear infinite;
+  border-radius: 6px;
+}
+
+/* ── Page layout ──────────────────────────────────────────────────────────── */
+.page-content {
+  margin-left: 256px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.page-body {
+  padding: 32px;
+  flex: 1;
+}
+
+.page-header {
+  margin-bottom: 28px;
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #e2eaf4;
+  margin: 0 0 6px;
+}
+
+.page-subtitle {
+  font-size: 0.9rem;
+  color: #5a7a9e;
+  margin: 0;
+}
+
+/* ── Portal role badge ────────────────────────────────────────────────────── */
+.role-patient { color: #2dd4bf; }
+.role-doctor  { color: #57a3f9; }
+.role-admin   { color: #fbbf24; }
+.role-nurse   { color: #34d399; }

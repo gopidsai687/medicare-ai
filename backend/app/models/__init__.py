@@ -1,0 +1,140 @@
+# MediCare models package — Full Enterprise Healthcare Architecture
+from app.models.user import User, UserRole
+from app.models.patient import Patient, BloodType, Gender
+from app.models.doctor import Doctor
+from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
+from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
+from app.models.prescription import Prescription, PrescriptionStatus
+from app.models.vital_sign import VitalSign
+from app.models.encounter import Encounter, EncounterType, EncounterStatus
+from app.models.audit_log import AuditLog, AuditAction, AuditSeverity
+
+# Enterprise Standard Models (53 Healthcare Canonical Entities)
+from app.models.enterprise_patient import (
+    PatientDetails,
+    PatientContact,
+    PatientAddress,
+    PatientIdentifier,
+    PatientEmergencyContact,
+    PatientInsurance,
+    PatientEmployment,
+    PatientPreference,
+)
+from app.models.enterprise_provider import (
+    SystemUser,
+    SystemRole,
+    SystemPermission,
+    UserRoleMapping,
+    RolePermissionMapping,
+    Department,
+    MedicalSpecialty,
+    DoctorDetails,
+    DoctorSpecialtyMapping,
+    DoctorAvailability,
+    FacilityRoom,
+    FacilityBed,
+)
+from app.models.enterprise_clinical import (
+    AppointmentMaster,
+    AppointmentEvent,
+    ClinicalEncounter,
+    DoctorNote,
+    ClinicalDiagnosis,
+    TreatmentPlan,
+    TreatmentItem,
+    MedicationCatalog,
+    PrescriptionMaster,
+    SurgicalProcedure,
+    SurgeryStaffAssignment,
+    InpatientAdmission,
+    PatientDischarge,
+    ClinicalFollowUp,
+)
+from app.models.enterprise_diagnostics import (
+    LaboratoryOrder,
+    LaboratoryResult,
+    DiagnosticReport,
+    ClinicalDocument,
+    DocumentChunk,
+    DocumentEmbedding,
+)
+from app.models.enterprise_governance import (
+    DuplicateCase,
+    PatientMergeHistory,
+    DataConflict,
+    RecordVersionSnapshot,
+    SecurityAuditLog,
+    PhiAccessLog,
+)
+
+__all__ = [
+    # Legacy / Active compatibility
+    "User",
+    "UserRole",
+    "Patient",
+    "BloodType",
+    "Gender",
+    "Doctor",
+    "Appointment",
+    "AppointmentStatus",
+    "AppointmentType",
+    "MedicalRecord",
+    "RecordCategory",
+    "RecordStatus",
+    "Prescription",
+    "PrescriptionStatus",
+    "VitalSign",
+    "Encounter",
+    "EncounterType",
+    "EncounterStatus",
+    "AuditLog",
+    "AuditAction",
+    "AuditSeverity",
+    # Enterprise Entities
+    "PatientDetails",
+    "PatientContact",
+    "PatientAddress",
+    "PatientIdentifier",
+    "PatientEmergencyContact",
+    "PatientInsurance",
+    "PatientEmployment",
+    "PatientPreference",
+    "SystemUser",
+    "SystemRole",
+    "SystemPermission",
+    "UserRoleMapping",
+    "RolePermissionMapping",
+    "Department",
+    "MedicalSpecialty",
+    "DoctorDetails",
+    "DoctorSpecialtyMapping",
+    "DoctorAvailability",
+    "FacilityRoom",
+    "FacilityBed",
+    "AppointmentMaster",
+    "AppointmentEvent",
+    "ClinicalEncounter",
+    "DoctorNote",
+    "ClinicalDiagnosis",
+    "TreatmentPlan",
+    "TreatmentItem",
+    "MedicationCatalog",
+    "PrescriptionMaster",
+    "SurgicalProcedure",
+    "SurgeryStaffAssignment",
+    "InpatientAdmission",
+    "PatientDischarge",
+    "ClinicalFollowUp",
+    "LaboratoryOrder",
+    "LaboratoryResult",
+    "DiagnosticReport",
+    "ClinicalDocument",
+    "DocumentChunk",
+    "DocumentEmbedding",
+    "DuplicateCase",
+    "PatientMergeHistory",
+    "DataConflict",
+    "RecordVersionSnapshot",
+    "SecurityAuditLog",
+    "PhiAccessLog",
+]

@@ -1,0 +1,91 @@
+# ===========================
+# MediCare .gitignore
+# ===========================
+
+# Environment files — NEVER COMMIT SECRETS
+.env
+.env.local
+.env.development
+.env.staging
+.env.production
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.Python
+.venv/
+venv/
+env/
+ENV/
+.eggs/
+*.whl
+.mypy_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+.hypothesis/
+
+# Node / Frontend
+node_modules/
+frontend/node_modules/
+.npm
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+frontend/dist/
+frontend/.vite/
+frontend/build/
+
+# IDE
+.vscode/settings.json
+.vscode/*.code-workspace
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Alembic
+backend/alembic.ini.local
+
+# MLflow artifacts
+data-science/mlruns/
+data-science/mlartifacts/
+
+# Secrets
+*.pem
+*.key
+*.p12
+*.pfx
+secrets/
+
+# Logs
+logs/
+*.log
+
+# Uploads / temp files
+uploads/
+tmp/
+temp/
+
+# Coverage
+coverage/
+.nyc_output/
