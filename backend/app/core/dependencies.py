@@ -47,13 +47,20 @@ async def get_current_user(
 CurrentUser = Annotated[User, Depends(get_current_user)]
 
 
-def require_roles(*roles: UserRole):
-    """Dependency factory: restrict endpoint to specific roles."""
+def require_roles(*roles: UserRole | list[UserRole]):
+    """Dependency factory: restrict endpoint to specific roles. Supports both require_roles(ROLE1, ROLE2) and require_roles([ROLE1, ROLE2])."""
+    flat_roles: list[UserRole] = []
+    for r in roles:
+        if isinstance(r, (list, tuple)):
+            flat_roles.extend(r)
+        else:
+            flat_roles.append(r)
+
     async def _check(current_user: CurrentUser) -> User:
-        if current_user.role not in roles:
+        if current_user.role not in flat_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Access restricted to: {', '.join(r.value for r in roles)}",
+                detail=f"Access restricted to: {', '.join(r.value for r in flat_roles)}",
             )
         return current_user
     return _check
