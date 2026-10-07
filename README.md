@@ -2,14 +2,14 @@
 
 > A full-stack, production-oriented healthcare management platform.
 
-[![Live Demo](https://img.shields.io/badge/Live_Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://temporary-swift-canyon-7pf0euj.vercel.app)
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://temporary-snappy-lute-m5y7xrs.vercel.app)
 [![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github)](https://github.com/gopidsai687/medicare-ai)
 [![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/gopidsai687/medicare-ai)
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/gopidsai687/medicare-ai)
 
 ### 🌐 Live Links
-- **Live Deployed App (Vercel):** [https://temporary-swift-canyon-7pf0euj.vercel.app](https://temporary-swift-canyon-7pf0euj.vercel.app)
-- **Claim Vercel Deployment:** [Claim Deployment Link](https://vercel.com/claim-deployment?code=f64f0bed-d158-45b3-8a66-de3a6b116d80)
+- **Live Deployed App (Vercel):** [https://temporary-snappy-lute-m5y7xrs.vercel.app](https://temporary-snappy-lute-m5y7xrs.vercel.app)
+- **Claim Vercel Deployment:** [Claim Deployment Link](https://vercel.com/claim-deployment?code=e6b51e62-9fe4-42cb-83bf-35ed64a5018c)
 - **GitHub Repository:** [https://github.com/gopidsai687/medicare-ai](https://github.com/gopidsai687/medicare-ai)
 - **Live Local Tunnel:** [https://tired-rats-tan.loca.lt](https://tired-rats-tan.loca.lt)
 
