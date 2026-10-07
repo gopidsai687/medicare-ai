@@ -2,6 +2,18 @@
 
 > A full-stack, production-oriented healthcare management platform.
 
+[![Live Demo](https://img.shields.io/badge/Live_Demo-Vercel-black?style=for-the-badge&logo=vercel)](https://temporary-swift-canyon-7pf0euj.vercel.app)
+[![GitHub Repo](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github)](https://github.com/karthik41-can/medicare-ai)
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/karthik41-can/medicare-ai)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/karthik41-can/medicare-ai)
+
+### 🌐 Live Links
+- **Live Deployed App (Vercel):** [https://temporary-swift-canyon-7pf0euj.vercel.app](https://temporary-swift-canyon-7pf0euj.vercel.app)
+- **Claim Vercel Deployment:** [Claim Deployment Link](https://vercel.com/claim-deployment?code=f64f0bed-d158-45b3-8a66-de3a6b116d80)
+- **GitHub Repository:** [https://github.com/karthik41-can/medicare-ai](https://github.com/karthik41-can/medicare-ai)
+- **Live Local Tunnel:** [https://tired-rats-tan.loca.lt](https://tired-rats-tan.loca.lt)
+
+
 ## Overview
 
 MediCare combines Electronic Patient Records, hospital management, AI-powered medical assistance, and analytics into a unified platform with three specialized portals:
