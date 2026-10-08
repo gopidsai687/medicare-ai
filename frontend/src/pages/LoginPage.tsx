@@ -18,20 +18,38 @@ const portals = [
   { role: 'admin',   label: 'Admin',   icon: Shield,       color: '#f59e0b', desc: 'System & staff management' },
 ]
 
+const DEMO_CREDENTIALS: Record<string, { email: string; password: string }> = {
+  admin:   { email: 'admin@medicare.ai', password: 'AdminPass123!' },
+  doctor:  { email: 'sarah.chen@medicare.ai', password: 'DoctorPass123!' },
+  patient: { email: 'alice.johnson@medicare.ai', password: 'PatientPass123!' },
+}
+
 export default function LoginPage() {
   const { login } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
+  const from = (location.state as { from?: { pathname: string } })?.from?.pathname
+
+  const initialPortal = from?.includes('doctor') ? 'doctor' : from?.includes('patient') ? 'patient' : 'admin'
   const [showPw, setShowPw] = useState(false)
-  const [selectedPortal, setSelectedPortal] = useState('patient')
+  const [selectedPortal, setSelectedPortal] = useState(initialPortal)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
 
-  const from = (location.state as { from?: { pathname: string } })?.from?.pathname
-
-  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
+    defaultValues: DEMO_CREDENTIALS[initialPortal],
   })
+
+  const handleSelectPortal = (role: string) => {
+    setSelectedPortal(role)
+    const creds = DEMO_CREDENTIALS[role]
+    if (creds) {
+      setValue('email', creds.email, { shouldValidate: true })
+      setValue('password', creds.password, { shouldValidate: true })
+    }
+    setError(null)
+  }
 
   const onSubmit = async (data: FormData) => {
     setError(null)
@@ -96,7 +114,7 @@ export default function LoginPage() {
                 <button
                   key={role}
                   type="button"
-                  onClick={() => setSelectedPortal(role)}
+                  onClick={() => handleSelectPortal(role)}
                   style={{
                     background: selectedPortal === role ? `${color}18` : 'rgba(15,32,64,0.5)',
                     border: `1px solid ${selectedPortal === role ? `${color}40` : 'rgba(255,255,255,0.07)'}`,
