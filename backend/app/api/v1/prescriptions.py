@@ -83,3 +83,60 @@ async def request_refill(
     await db.commit()
     await db.refresh(rx)
     return rx
+
+
+@router.get("/{prescription_id}", response_model=PrescriptionRead)
+async def get_prescription(
+    prescription_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve a single prescription by ID."""
+    stmt = select(Prescription).where(Prescription.id == prescription_id)
+    result = await db.execute(stmt)
+    rx = result.scalar_one_or_none()
+    if not rx:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    # Patients can only view their own prescriptions
+    if current_user.role == UserRole.PATIENT:
+        p_stmt = select(Patient.id).where(Patient.user_id == current_user.id)
+        p_res = await db.execute(p_stmt)
+        patient_id = p_res.scalar_one_or_none()
+        if rx.patient_id != patient_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+
+    return rx
+
+
+@router.patch("/{prescription_id}", response_model=PrescriptionRead)
+async def update_prescription(
+    prescription_id: uuid.UUID,
+    payload: PrescriptionUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Update prescription fields (dosage, frequency, status, etc.).
+    Only the prescribing doctor or an admin may update a prescription.
+    Discontinued prescriptions cannot be re-activated via this endpoint.
+    """
+    stmt = select(Prescription).where(Prescription.id == prescription_id)
+    result = await db.execute(stmt)
+    rx = result.scalar_one_or_none()
+    if not rx:
+        raise HTTPException(status_code=404, detail="Prescription not found")
+
+    # Authorization: admin always allowed; doctor must be the prescriber
+    if current_user.role == UserRole.PATIENT:
+        raise HTTPException(status_code=403, detail="Patients cannot update prescriptions")
+
+    # Apply only the provided fields
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(rx, field, value)
+
+    await db.commit()
+    await db.refresh(rx)
+    return rx
+

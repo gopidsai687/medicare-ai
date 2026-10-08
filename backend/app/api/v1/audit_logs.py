@@ -17,12 +17,16 @@ router = APIRouter(prefix="/audit-logs", tags=["Audit Logs"])
 async def get_audit_logs(
     action: Optional[AuditAction] = None,
     severity: Optional[AuditSeverity] = None,
+    user_id: Optional[uuid.UUID] = Query(None, description="Filter by user UUID"),
+    resource_type: Optional[str] = Query(None, description="Filter by resource type, e.g. 'Patient'"),
+    skip: int = Query(0, ge=0),
     limit: int = Query(50, le=200),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(require_role([UserRole.ADMIN])),
 ):
     """
     Returns security telemetry and HIPAA access logs.
+    Supports filtering by action, severity, user, and resource type.
     """
     query = select(AuditLog)
 
@@ -30,7 +34,12 @@ async def get_audit_logs(
         query = query.where(AuditLog.action == action)
     if severity:
         query = query.where(AuditLog.severity == severity)
+    if user_id:
+        query = query.where(AuditLog.user_id == user_id)
+    if resource_type:
+        query = query.where(AuditLog.resource_type.ilike(f"%{resource_type}%"))
 
-    query = query.order_by(desc(AuditLog.created_at)).limit(limit)
+    query = query.order_by(desc(AuditLog.created_at)).offset(skip).limit(limit)
     result = await db.execute(query)
     return result.scalars().all()
+
