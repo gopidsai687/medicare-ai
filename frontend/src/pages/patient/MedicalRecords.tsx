@@ -18,6 +18,7 @@ import {
   User,
   Info,
 } from 'lucide-react'
+import { useToast } from '@/lib/toast'
 
 interface MedicalRecordItem {
   id: string
@@ -101,6 +102,7 @@ const INITIAL_RECORDS: MedicalRecordItem[] = [
 ]
 
 export default function PatientMedicalRecords() {
+  const { success } = useToast()
   const [records, setRecords] = useState<MedicalRecordItem[]>(INITIAL_RECORDS)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -221,7 +223,7 @@ export default function PatientMedicalRecords() {
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => alert('Downloading comprehensive PDF health record...')}
+            onClick={() => success('Download started', 'Your comprehensive PDF health record is being prepared.')}
             className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 flex items-center gap-2 transition-all"
           >
             <Download size={15} /> Export Health Summary

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Calendar, Clock, Plus, Search, Video, X, CheckCircle, AlertCircle, MapPin, User, Stethoscope } from 'lucide-react'
 import api from '@/lib/api'
+import { useToast } from '@/lib/toast'
 
 interface AppointmentItem {
   id: string
@@ -69,6 +70,7 @@ const DOCTORS = [
 ]
 
 export default function PatientAppointments() {
+  const { success } = useToast()
   const [appointments, setAppointments] = useState<AppointmentItem[]>(INITIAL_APPOINTMENTS)
   const [filterStatus, setFilterStatus] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
@@ -265,7 +267,7 @@ export default function PatientAppointments() {
               <div className="flex items-center gap-2 self-end lg:self-center shrink-0">
                 {apt.type === 'Telehealth' && (apt.status === 'Confirmed' || apt.status === 'Scheduled') && (
                   <button
-                    onClick={() => alert(`Connecting to virtual room: ${apt.location}`)}
+                    onClick={() => success('Launching telehealth session', `Connecting to virtual room: ${apt.location}`)}
                     className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/30 flex items-center gap-1.5 transition-all"
                   >
                     <Video size={14} /> Join Call

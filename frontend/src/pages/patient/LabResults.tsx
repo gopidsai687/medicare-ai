@@ -13,6 +13,7 @@ import {
   AlertTriangle,
   Info,
 } from 'lucide-react'
+import { useToast } from '@/lib/toast'
 
 interface LabTest {
   name: string
@@ -73,6 +74,7 @@ const LAB_PANELS: LabPanel[] = [
 ]
 
 export default function PatientLabResults() {
+  const { success } = useToast()
   const [panels, setPanels] = useState<LabPanel[]>(LAB_PANELS)
   const [selectedPanelId, setSelectedPanelId] = useState<string>(LAB_PANELS[0].id)
   const [isLive, setIsLive] = useState(false)
@@ -131,7 +133,7 @@ export default function PatientLabResults() {
           </p>
         </div>
         <button
-          onClick={() => alert('Exporting lab test report...')}
+          onClick={() => success('Download started', 'Your official lab report PDF is being generated.')}
           className="btn-primary inline-flex items-center gap-2"
         >
           <Download size={15} /> Download Official Lab Report

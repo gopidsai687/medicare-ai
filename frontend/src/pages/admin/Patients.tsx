@@ -19,6 +19,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import api from '@/lib/api'
+import { useToast } from '@/lib/toast'
 
 interface PatientRow {
   id: string
@@ -63,6 +64,7 @@ const INITIAL_DUPLICATES: DuplicateCandidate[] = [
 ]
 
 export default function AdminPatients() {
+  const { info } = useToast()
   const [activeTab, setActiveTab] = useState<'all' | 'mpi'>('all')
   const [patients, setPatients] = useState<PatientRow[]>(INITIAL_PATIENTS)
   const [duplicates, setDuplicates] = useState<DuplicateCandidate[]>(INITIAL_DUPLICATES)
@@ -229,7 +231,7 @@ export default function AdminPatients() {
             <RefreshCw size={15} className={isLoadingApi ? 'animate-spin' : ''} />
           </button>
           <button
-            onClick={() => alert('Exporting HIPAA compliant patient census & MPI merge audit report...')}
+            onClick={() => info('Generating export…', 'Preparing HIPAA-compliant patient census & MPI merge audit report.')}
             className="btn-primary inline-flex items-center gap-2"
           >
             <Download size={14} /> Export Patient Census

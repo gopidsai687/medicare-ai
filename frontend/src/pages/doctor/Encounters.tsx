@@ -13,6 +13,7 @@ import {
   Search,
 } from 'lucide-react'
 import api from '@/lib/api'
+import { useToast } from '@/lib/toast'
 
 interface EncounterRecord {
   id: string
@@ -57,6 +58,7 @@ const TEMPLATES = [
 ]
 
 export default function DoctorEncounters() {
+  const { warning } = useToast()
   const [selectedPatient, setSelectedPatient] = useState('Alice Johnson (MRN-00000012)')
   const [encounterType, setEncounterType] = useState('Outpatient Consultation')
   const [chiefComplaint, setChiefComplaint] = useState(TEMPLATES[0].chiefComplaint)
@@ -106,7 +108,7 @@ export default function DoctorEncounters() {
 
   const handleSignNote = async () => {
     if (!chiefComplaint || !assessment || !plan) {
-      alert('Please complete the Chief Complaint, Assessment, and Plan before signing.')
+      warning('Incomplete SOAP note', 'Please complete the Chief Complaint, Assessment, and Plan before signing.')
       return
     }
     const stamp = `Electronically Signed by Dr. Sarah Chen, MD (Cardiology) on ${new Date().toLocaleString()}`

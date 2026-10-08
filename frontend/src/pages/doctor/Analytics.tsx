@@ -30,6 +30,7 @@ import {
   Legend,
   CartesianGrid,
 } from 'recharts'
+import { useToast } from '@/lib/toast'
 
 const DISEASE_DISTRIBUTION = [
   { name: 'Hypertension (I10)', count: 68, color: '#3182f4' },
@@ -102,6 +103,7 @@ const HIGH_RISK_PATIENTS = [
 ]
 
 export default function DoctorAnalytics() {
+  const { success, info } = useToast()
   const [timeRange, setTimeRange] = useState<'3M' | '6M' | '1Y'>('6M')
   const [censusCount, setCensusCount] = useState(142)
   const [isLive, setIsLive] = useState(false)
@@ -162,7 +164,7 @@ export default function DoctorAnalytics() {
           </div>
 
           <button
-            onClick={() => alert('Generating Comprehensive Clinical Quality & NCQA HEDIS Compliance Report...')}
+            onClick={() => success('Report queued', 'Generating Comprehensive Clinical Quality & NCQA HEDIS Compliance Report.')}
             className="btn-primary text-xs flex items-center gap-1.5"
           >
             <Download size={14} /> Export Report
@@ -398,7 +400,7 @@ export default function DoctorAnalytics() {
                   <td className="py-3.5 px-4 text-slate-400">{p.nextDue}</td>
                   <td className="py-3.5 px-4 text-right">
                     <button
-                      onClick={() => alert(`Initiating clinical pathway for ${p.name}: ${p.action}`)}
+                      onClick={() => info('Initiating pathway', `Clinical pathway for ${p.name}: ${p.action}`)}
                       className="btn-primary text-xs py-1.5 px-3 inline-flex items-center gap-1"
                     >
                       <Stethoscope size={13} /> {p.action}

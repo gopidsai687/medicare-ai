@@ -13,6 +13,7 @@ import {
   MapPin,
   AlertCircle,
 } from 'lucide-react'
+import { useToast } from '@/lib/toast'
 
 interface ScheduleSlot {
   id: string
@@ -90,6 +91,7 @@ const INITIAL_SLOTS: ScheduleSlot[] = [
 
 export default function DoctorSchedule() {
   const navigate = useNavigate()
+  const { success } = useToast()
   const [slots, setSlots] = useState<ScheduleSlot[]>(INITIAL_SLOTS)
   const [currentDateIndex, setCurrentDateIndex] = useState(0)
   const [isLive, setIsLive] = useState(false)
@@ -258,7 +260,7 @@ export default function DoctorSchedule() {
                 )}
                 {slot.isTelehealth && slot.status !== 'Completed' && (
                   <button
-                    onClick={() => alert(`Launching doctor telehealth video portal for ${slot.patient}`)}
+                    onClick={() => success('Telehealth portal launching', `Starting video session for ${slot.patient}`)}
                     className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 border border-emerald-500/20 inline-flex items-center gap-1 transition-all"
                   >
                     <Video size={14} /> Launch Video
