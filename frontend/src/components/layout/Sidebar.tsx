@@ -45,6 +45,7 @@ const DOCTOR_NAV: NavItem[] = [
   { to: '/doctor/labs', icon: FlaskConical, label: 'Labs' },
   { to: '/doctor/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/doctor/ai', icon: Brain, label: 'AI Assistant' },
+  { to: '/doctor/settings', icon: Settings, label: 'Settings' },
 ]
 
 const ADMIN_NAV: NavItem[] = [

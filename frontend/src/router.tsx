@@ -24,6 +24,7 @@ const DoctorEncounters = lazy(() => import('@/pages/doctor/Encounters'))
 const DoctorLabs = lazy(() => import('@/pages/doctor/Labs'))
 const DoctorAnalytics = lazy(() => import('@/pages/doctor/Analytics'))
 const DoctorAIAssistant = lazy(() => import('@/pages/doctor/AIAssistant'))
+const DoctorSettings = lazy(() => import('@/pages/doctor/Settings'))
 
 // Admin
 const AdminDashboard = lazy(() => import('@/pages/admin/Dashboard'))
@@ -88,6 +89,7 @@ export const router = createBrowserRouter([
           { path: '/doctor/labs', element: withSuspense(DoctorLabs) },
           { path: '/doctor/analytics', element: withSuspense(DoctorAnalytics) },
           { path: '/doctor/ai', element: withSuspense(DoctorAIAssistant) },
+          { path: '/doctor/settings', element: withSuspense(DoctorSettings) },
         ],
       },
     ],
