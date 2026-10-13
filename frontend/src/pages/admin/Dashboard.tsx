@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Users, Stethoscope, Calendar, Activity, TrendingUp, AlertTriangle, Settings, Shield } from 'lucide-react'
+import { Users, Stethoscope, Calendar, Activity, TrendingUp, AlertTriangle, Settings, Shield, Brain, Pill, FileSearch, Loader2 } from 'lucide-react'
 import api from '@/lib/api'
 
 const stats = [
@@ -22,9 +22,19 @@ const systemMetrics = [
   { label: 'Failed Logins (24h)', value: '2', color: '#34d399', good: true },
 ]
 
+interface RxMetrics {
+  total_analyses: number
+  pending_clinician_reviews: number
+  unresolved_safety_alerts: number
+  ai_service_status: string
+  medical_api_status: string
+}
+
 export default function AdminDashboard() {
   const [dashboardStats, setDashboardStats] = useState(stats)
   const [isLive, setIsLive] = useState(false)
+  const [rxMetrics, setRxMetrics] = useState<RxMetrics | null>(null)
+  const [isLoadingRx, setIsLoadingRx] = useState(false)
 
   useEffect(() => {
     async function loadStats() {
@@ -56,7 +66,22 @@ export default function AdminDashboard() {
         console.warn('Dashboard stats fallback:', err)
       }
     }
+
+    async function loadRxMetrics() {
+      setIsLoadingRx(true)
+      try {
+        const res = await api.get('/api/v1/prescription-analysis/admin/metrics')
+        setRxMetrics(res.data)
+      } catch {
+        // Fallback to static display
+        setRxMetrics(null)
+      } finally {
+        setIsLoadingRx(false)
+      }
+    }
+
     loadStats()
+    loadRxMetrics()
   }, [])
 
   return (
@@ -118,30 +143,80 @@ export default function AdminDashboard() {
           </table>
         </div>
 
-        {/* System health */}
-        <div className="glass animate-fade-in-up" style={{ animationDelay: '180ms', padding: 24 }}>
-          <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: '0 0 20px' }}>
-            System Health
-          </h2>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {systemMetrics.map(({ label, value, color, good }) => (
-              <div key={label} className="glass-sm" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>{label}</div>
-                  <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#e2eaf4' }}>{value}</div>
+        {/* System health + AI Metrics */}
+        <div className="space-y-5">
+          <div className="glass animate-fade-in-up" style={{ animationDelay: '180ms', padding: 24 }}>
+            <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: '0 0 20px' }}>
+              System Health
+            </h2>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              {systemMetrics.map(({ label, value, color, good }) => (
+                <div key={label} className="glass-sm" style={{ padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>{label}</div>
+                    <div style={{ fontSize: '1.1rem', fontWeight: 700, color: '#e2eaf4' }}>{value}</div>
+                  </div>
+                  <div style={{ width: 8, height: 8, borderRadius: '50%', background: color,
+                    boxShadow: `0 0 8px ${color}` }} />
                 </div>
-                <div style={{ width: 8, height: 8, borderRadius: '50%', background: color,
-                  boxShadow: `0 0 8px ${color}` }} />
-              </div>
-            ))}
-          </div>
-          <div style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(49,130,244,0.08)',
-            border: '1px solid rgba(49,130,244,0.15)', borderRadius: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-              <Shield size={12} style={{ color: '#57a3f9' }} />
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#57a3f9' }}>Security Status</span>
+              ))}
             </div>
-            <div style={{ fontSize: '0.72rem', color: '#5a7a9e' }}>All systems nominal. Last security scan: 1h ago.</div>
+            <div style={{ marginTop: 16, padding: '12px 16px', background: 'rgba(49,130,244,0.08)',
+              border: '1px solid rgba(49,130,244,0.15)', borderRadius: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <Shield size={12} style={{ color: '#57a3f9' }} />
+                <span style={{ fontSize: '0.75rem', fontWeight: 600, color: '#57a3f9' }}>Security Status</span>
+              </div>
+              <div style={{ fontSize: '0.72rem', color: '#5a7a9e' }}>All systems nominal. Last security scan: 1h ago.</div>
+            </div>
+          </div>
+
+          {/* Prescription AI Analytics */}
+          <div className="glass animate-fade-in-up" style={{ animationDelay: '240ms', padding: 24 }}>
+            <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: '0 0 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Brain size={16} style={{ color: '#a78bfa' }} />
+              Rx AI Analytics
+            </h2>
+            {isLoadingRx ? (
+              <div style={{ textAlign: 'center', padding: '16px 0' }}>
+                <Loader2 size={20} className="animate-spin" style={{ color: '#a78bfa', margin: '0 auto' }} />
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div className="glass-sm" style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <FileSearch size={14} style={{ color: '#a78bfa' }} />
+                    <span style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>Total Analyses</span>
+                  </div>
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: '#e2eaf4' }}>{rxMetrics?.total_analyses ?? 0}</span>
+                </div>
+                <div className="glass-sm" style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Stethoscope size={14} style={{ color: '#3182f4' }} />
+                    <span style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>Pending Reviews</span>
+                  </div>
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: rxMetrics && rxMetrics.pending_clinician_reviews > 0 ? '#f59e0b' : '#e2eaf4' }}>
+                    {rxMetrics?.pending_clinician_reviews ?? 0}
+                  </span>
+                </div>
+                <div className="glass-sm" style={{ padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <AlertTriangle size={14} style={{ color: '#f87171' }} />
+                    <span style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>Safety Alerts</span>
+                  </div>
+                  <span style={{ fontSize: '1rem', fontWeight: 700, color: rxMetrics && rxMetrics.unresolved_safety_alerts > 0 ? '#f87171' : '#e2eaf4' }}>
+                    {rxMetrics?.unresolved_safety_alerts ?? 0}
+                  </span>
+                </div>
+                <div style={{ padding: '10px 14px', background: 'rgba(167,139,250,0.08)', border: '1px solid rgba(167,139,250,0.15)', borderRadius: 10, marginTop: 4 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <div style={{ width: 6, height: 6, borderRadius: '50%', background: '#34d399', boxShadow: '0 0 6px #34d399' }} />
+                    <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#a78bfa' }}>AI Engine</span>
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: '#5a7a9e' }}>{rxMetrics?.ai_service_status || 'Active (Clinical Engine)'}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

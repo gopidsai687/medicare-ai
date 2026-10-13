@@ -5,6 +5,20 @@ from app.models.doctor import Doctor
 from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
 from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
 from app.models.prescription import Prescription, PrescriptionStatus
+from app.models.prescription_analysis import (
+    PrescriptionUpload,
+    UploadStatus,
+    ReviewStatus,
+    PrescriptionExtractedItem,
+    PrescriptionAnalysisReport,
+    MedicationReminder,
+    PrescriptionChatMessage,
+)
+from app.models.medical_report_analysis import (
+    MedicalReportUpload,
+    MedicalReportAnalysisResult,
+    MedicalReportChatMessage,
+)
 from app.models.vital_sign import VitalSign
 from app.models.encounter import Encounter, EncounterType, EncounterStatus
 from app.models.audit_log import AuditLog, AuditAction, AuditSeverity
@@ -83,6 +97,16 @@ __all__ = [
     "RecordStatus",
     "Prescription",
     "PrescriptionStatus",
+    "PrescriptionUpload",
+    "UploadStatus",
+    "ReviewStatus",
+    "PrescriptionExtractedItem",
+    "PrescriptionAnalysisReport",
+    "MedicationReminder",
+    "PrescriptionChatMessage",
+    "MedicalReportUpload",
+    "MedicalReportAnalysisResult",
+    "MedicalReportChatMessage",
     "VitalSign",
     "Encounter",
     "EncounterType",

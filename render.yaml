@@ -1,18 +1,17 @@
 services:
   - type: web
-    name: medicare-backend
-    runtime: python
-    rootDir: backend
-    buildCommand: "pip install -r requirements.txt aiosqlite email-validator"
-    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    name: medicare-ai
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: PYTHON_VERSION
-        value: 3.12.0
       - key: ENVIRONMENT
         value: production
       - key: USE_SQLITE_FALLBACK
-        value: "true"
+        value: "True"
       - key: JWT_SECRET
         generateValue: true
-      - key: ALLOWED_ORIGINS_RAW
-        value: "http://localhost:5173,https://*.vercel.app"
+      - key: SECRET_KEY
+        generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false

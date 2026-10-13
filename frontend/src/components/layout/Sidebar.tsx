@@ -16,6 +16,9 @@ import {
   FlaskConical,
   Brain,
   Building2,
+  FileSearch,
+  Pill,
+  Sparkles,
   LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
@@ -29,11 +32,14 @@ interface NavItem {
 
 const PATIENT_NAV: NavItem[] = [
   { to: '/patient', icon: Home, label: 'Dashboard' },
+  { to: '/patient/prescriptions', icon: Pill, label: 'Prescription Analyzer' },
+  { to: '/patient/reports', icon: FileSearch, label: 'Medical Report Analyzer' },
+  { to: '/patient/analyses', icon: Sparkles, label: 'Previous AI Analyses' },
+  { to: '/patient/records', icon: ClipboardList, label: 'My Medical Documents' },
   { to: '/patient/appointments', icon: Calendar, label: 'Appointments' },
-  { to: '/patient/records', icon: ClipboardList, label: 'Medical Records' },
   { to: '/patient/medications', icon: Activity, label: 'Medications' },
   { to: '/patient/labs', icon: FlaskConical, label: 'Lab Results' },
-  { to: '/patient/ai', icon: Brain, label: 'AI Assistant' },
+  { to: '/patient/ai', icon: Brain, label: 'AI Health Assistant' },
   { to: '/patient/settings', icon: Settings, label: 'Settings' },
 ]
 

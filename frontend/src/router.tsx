@@ -14,6 +14,9 @@ const PatientRecords = lazy(() => import('@/pages/patient/MedicalRecords'))
 const PatientMedications = lazy(() => import('@/pages/patient/Medications'))
 const PatientLabResults = lazy(() => import('@/pages/patient/LabResults'))
 const PatientAIAssistant = lazy(() => import('@/pages/patient/AIAssistant'))
+const PatientPrescriptionAnalysis = lazy(() => import('@/pages/patient/PrescriptionAnalysis'))
+const PatientMedicalReportAnalysis = lazy(() => import('@/pages/patient/MedicalReportAnalysis'))
+const PatientPreviousAnalyses = lazy(() => import('@/pages/patient/PreviousAnalyses'))
 const PatientSettings = lazy(() => import('@/pages/patient/Settings'))
 
 // Doctor
@@ -69,6 +72,9 @@ export const router = createBrowserRouter([
           { path: '/patient/medications', element: withSuspense(PatientMedications) },
           { path: '/patient/labs', element: withSuspense(PatientLabResults) },
           { path: '/patient/ai', element: withSuspense(PatientAIAssistant) },
+          { path: '/patient/prescriptions', element: withSuspense(PatientPrescriptionAnalysis) },
+          { path: '/patient/reports', element: withSuspense(PatientMedicalReportAnalysis) },
+          { path: '/patient/analyses', element: withSuspense(PatientPreviousAnalyses) },
           { path: '/patient/settings', element: withSuspense(PatientSettings) },
         ],
       },

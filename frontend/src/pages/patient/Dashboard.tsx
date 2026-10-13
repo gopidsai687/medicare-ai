@@ -1,5 +1,18 @@
 import { useState, useEffect } from 'react'
-import { Calendar, ClipboardList, Activity, FlaskConical, ArrowRight, Heart } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import {
+  Calendar,
+  ClipboardList,
+  Activity,
+  FlaskConical,
+  ArrowRight,
+  Heart,
+  Pill,
+  FileSearch,
+  Sparkles,
+  ShieldCheck,
+  Zap,
+} from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import api from '@/lib/api'
 
@@ -26,6 +39,7 @@ const vitals = [
 
 export default function PatientDashboard() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [dashboardStats, setDashboardStats] = useState(stats)
   const [isLive, setIsLive] = useState(false)
 
@@ -98,6 +112,115 @@ export default function PatientDashboard() {
             <div style={{ fontSize: '0.8rem', color: '#5a7a9e' }}>{label}</div>
           </div>
         ))}
+      </div>
+
+      {/* AI Clinical Intelligence Features */}
+      <div className="animate-fade-in-up" style={{ marginBottom: 28 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ width: 28, height: 28, borderRadius: 8, background: 'rgba(49,130,244,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Sparkles size={16} style={{ color: '#3182f4' }} />
+            </div>
+            <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.05rem', fontWeight: 700, color: '#e2eaf4', margin: 0 }}>
+              AI Clinical Document Guidance
+            </h2>
+          </div>
+          <span style={{ fontSize: '0.75rem', color: '#5a7a9e' }}>
+            Evidence-Based Analysis & Patient Guidance
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 16 }}>
+          {/* Card 1: Prescription Analyzer */}
+          <div
+            onClick={() => navigate('/patient/prescriptions')}
+            className="glass stat-card"
+            style={{
+              padding: '20px 22px',
+              cursor: 'pointer',
+              border: '1px solid rgba(49,130,244,0.2)',
+              background: 'linear-gradient(135deg, rgba(15,32,64,0.7), rgba(49,130,244,0.08))',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(49,130,244,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Pill size={22} style={{ color: '#3182f4' }} />
+              </div>
+              <span className="badge badge-blue">Upload & OCR</span>
+            </div>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', marginBottom: 6 }}>
+              Prescription Analyzer
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: '#7a9ec2', lineHeight: 1.45, marginBottom: 14 }}>
+              Upload prescription scans or PDFs. Extract medications, dosage, food precautions, safety interactions, and checklist.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: '#3182f4' }}>
+              <span>Analyze Prescription</span>
+              <ArrowRight size={14} />
+            </div>
+          </div>
+
+          {/* Card 2: Medical Report Analyzer */}
+          <div
+            onClick={() => navigate('/patient/reports')}
+            className="glass stat-card"
+            style={{
+              padding: '20px 22px',
+              cursor: 'pointer',
+              border: '1px solid rgba(20,184,166,0.2)',
+              background: 'linear-gradient(135deg, rgba(15,32,64,0.7), rgba(20,184,166,0.08))',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(20,184,166,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <FileSearch size={22} style={{ color: '#14b8a6' }} />
+              </div>
+              <span className="badge badge-teal">Lab & Diagnostics</span>
+            </div>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', marginBottom: 6 }}>
+              Medical Report Analyzer
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: '#7a9ec2', lineHeight: 1.45, marginBottom: 14 }}>
+              Upload lab results, blood panels, or imaging reports. Get plain-English explanations of flagged findings and reference ranges.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: '#14b8a6' }}>
+              <span>Analyze Medical Report</span>
+              <ArrowRight size={14} />
+            </div>
+          </div>
+
+          {/* Card 3: Previous AI Analyses */}
+          <div
+            onClick={() => navigate('/patient/analyses')}
+            className="glass stat-card"
+            style={{
+              padding: '20px 22px',
+              cursor: 'pointer',
+              border: '1px solid rgba(245,158,11,0.2)',
+              background: 'linear-gradient(135deg, rgba(15,32,64,0.7), rgba(245,158,11,0.08))',
+              transition: 'all 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <div style={{ width: 42, height: 42, borderRadius: 12, background: 'rgba(245,158,11,0.15)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Sparkles size={22} style={{ color: '#f59e0b' }} />
+              </div>
+              <span className="badge badge-amber">Interactive Q&A</span>
+            </div>
+            <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', marginBottom: 6 }}>
+              Previous AI Analyses
+            </h3>
+            <p style={{ fontSize: '0.8rem', color: '#7a9ec2', lineHeight: 1.45, marginBottom: 14 }}>
+              Review past prescription and lab analyses, revisit your Personalized Next Steps, and ask document-grounded AI questions.
+            </p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', fontWeight: 600, color: '#f59e0b' }}>
+              <span>View Analysis History</span>
+              <ArrowRight size={14} />
+            </div>
+          </div>
+        </div>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 20 }}>
