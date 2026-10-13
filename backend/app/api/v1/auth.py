@@ -102,3 +102,22 @@ async def register(
     db.add(user)
     await db.flush()
     return user
+
+
+@router.get("/demo-status")
+async def get_demo_status(db: Annotated[AsyncSession, Depends(get_db)]):
+    """Verify and ensure baseline clinical demo accounts are provisioned."""
+    from app.core.seed import seed_initial_data
+    await seed_initial_data(db)
+    res_admin = await db.execute(select(User).where(User.email == "admin@medicare.ai"))
+    res_doc = await db.execute(select(User).where(User.email == "sarah.chen@medicare.ai"))
+    res_pat = await db.execute(select(User).where(User.email == "alice.johnson@medicare.ai"))
+    return {
+        "status": "ready",
+        "accounts": {
+            "admin": res_admin.scalar_one_or_none() is not None,
+            "doctor": res_doc.scalar_one_or_none() is not None,
+            "patient": res_pat.scalar_one_or_none() is not None,
+        }
+    }
+
