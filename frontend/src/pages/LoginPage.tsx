@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { Heart, Eye, EyeOff, Shield, Stethoscope, User, AlertCircle, Loader2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
@@ -25,16 +25,32 @@ const DEMO_CREDENTIALS: Record<string, { email: string; password: string }> = {
 }
 
 export default function LoginPage() {
-  const { login } = useAuth()
+  const { login, user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname
 
-  const initialPortal = from?.includes('doctor') ? 'doctor' : from?.includes('patient') ? 'patient' : 'admin'
+  const initialPortal = from?.includes('doctor') ? 'doctor' : from?.includes('admin') ? 'admin' : 'patient'
   const [showPw, setShowPw] = useState(false)
   const [selectedPortal, setSelectedPortal] = useState(initialPortal)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+
+  const roleMap: Record<string, string> = {
+    patient: '/patient',
+    doctor: '/doctor',
+    admin: '/admin',
+    nurse: '/doctor',
+  }
+
+  // Auto-redirect if user already has an active session
+  useEffect(() => {
+    if (!authLoading && user) {
+      const defaultPath = roleMap[user.role.toLowerCase()] || '/patient'
+      const target = (from && from.startsWith(defaultPath)) ? from : defaultPath
+      navigate(target, { replace: true })
+    }
+  }, [user, authLoading, navigate, from])
 
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema),
@@ -55,13 +71,13 @@ export default function LoginPage() {
     setError(null)
     setIsLoading(true)
     try {
-      await login(data.email, data.password)
-      const roleMap: Record<string, string> = {
-        patient: '/patient', doctor: '/doctor', admin: '/admin', nurse: '/doctor',
-      }
-      navigate(from ?? roleMap[selectedPortal] ?? '/patient', { replace: true })
+      const authUser = await login(data.email, data.password)
+      const verifiedRole = authUser?.role?.toLowerCase() || localStorage.getItem('user_role')?.toLowerCase() || 'patient'
+      const defaultPath = roleMap[verifiedRole] ?? '/patient'
+      const target = (from && from.startsWith(defaultPath)) ? from : defaultPath
+      navigate(target, { replace: true })
     } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { detail?: string } } })
+      const msg = (err as Error)?.message ?? (err as { response?: { data?: { detail?: string } } })
         ?.response?.data?.detail ?? 'Login failed. Check your credentials.'
       setError(msg)
     } finally {

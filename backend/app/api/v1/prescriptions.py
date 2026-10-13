@@ -48,9 +48,21 @@ async def create_prescription(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    if current_user.role == UserRole.PATIENT:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Patients cannot create prescriptions")
+
+    doctor_id = payload.doctor_id
+    if current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        from app.models.doctor import Doctor
+        d_stmt = select(Doctor.id).where(Doctor.user_id == current_user.id)
+        d_res = await db.execute(d_stmt)
+        my_doc_id = d_res.scalar_one_or_none()
+        if my_doc_id:
+            doctor_id = my_doc_id
+
     rx = Prescription(
         patient_id=payload.patient_id,
-        doctor_id=payload.doctor_id,
+        doctor_id=doctor_id,
         medication_name=payload.medication_name,
         dosage=payload.dosage,
         frequency=payload.frequency,
@@ -78,6 +90,13 @@ async def request_refill(
     rx = result.scalar_one_or_none()
     if not rx:
         raise HTTPException(status_code=404, detail="Prescription not found")
+
+    if current_user.role == UserRole.PATIENT:
+        p_stmt = select(Patient.id).where(Patient.user_id == current_user.id)
+        p_res = await db.execute(p_stmt)
+        my_patient_id = p_res.scalar_one_or_none()
+        if rx.patient_id != my_patient_id:
+            raise HTTPException(status_code=403, detail="Forbidden: You can only request refills for your own prescriptions")
 
     rx.status = PrescriptionStatus.PENDING_REFILL
     await db.commit()

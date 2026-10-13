@@ -54,6 +54,7 @@ from app.models.doctor import Doctor
 @router.get("/doctors")
 async def list_doctors(
     db: Annotated[AsyncSession, Depends(get_db)],
+    current_user: CurrentUser,
 ):
     result = await db.execute(select(Doctor))
     docs = result.scalars().all()

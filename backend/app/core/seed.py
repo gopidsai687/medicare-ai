@@ -2,7 +2,7 @@
 Auto-seeder for MediCare AI.
 Guarantees standard clinical demo credentials exist for production evaluation.
 """
-from datetime import date
+from datetime import date, datetime, timezone
 import uuid
 import structlog
 from sqlalchemy import select
@@ -12,6 +12,9 @@ from app.core.security import hash_password
 from app.models.user import User, UserRole
 from app.models.doctor import Doctor
 from app.models.patient import Patient, BloodType, Gender
+from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
+from app.models.prescription import Prescription, PrescriptionStatus
+from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
 
 log = structlog.get_logger(__name__)
 
@@ -121,6 +124,92 @@ async def seed_initial_data(session: AsyncSession) -> None:
             session.add(pat_profile)
             await session.flush()
             log.info("Seeded patient profile for Alice Johnson")
+
+        # 4. Clinical Relationship Data: Appointment between Alice and Dr. Sarah Chen
+        if pat_profile and doc_profile:
+            res_appt = await session.execute(
+                select(Appointment).where(Appointment.patient_id == pat_profile.id)
+            )
+            if not res_appt.scalar_one_or_none():
+                appt = Appointment(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    scheduled_at=datetime(2026, 10, 20, 10, 0, tzinfo=timezone.utc),
+                    duration_minutes=30,
+                    status=AppointmentStatus.SCHEDULED,
+                    appointment_type=AppointmentType.IN_PERSON,
+                    reason="Comprehensive Wellness Examination & Diagnostic Review",
+                    room="Examination Suite 3B",
+                )
+                session.add(appt)
+                await session.flush()
+                log.info("Seeded appointment for Alice Johnson with Dr. Sarah Chen")
+
+            # 5. Prescriptions for Alice Johnson
+            res_rx = await session.execute(
+                select(Prescription).where(Prescription.patient_id == pat_profile.id)
+            )
+            if not res_rx.scalars().first():
+                rx1 = Prescription(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    medication_name="Lisinopril",
+                    dosage="10mg",
+                    frequency="Once daily in the morning",
+                    route="Oral",
+                    start_date=date(2026, 1, 15),
+                    refills_remaining=3,
+                    instructions="Take with or without food. Monitor blood pressure weekly.",
+                    status=PrescriptionStatus.ACTIVE,
+                )
+                rx2 = Prescription(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    medication_name="Metformin",
+                    dosage="500mg",
+                    frequency="Twice daily with meals",
+                    route="Oral",
+                    start_date=date(2026, 2, 1),
+                    refills_remaining=2,
+                    instructions="Take with meals to minimize GI discomfort.",
+                    status=PrescriptionStatus.ACTIVE,
+                )
+                session.add_all([rx1, rx2])
+                await session.flush()
+                log.info("Seeded active clinical prescriptions for Alice Johnson")
+
+            # 6. Medical Records for Alice Johnson
+            res_med = await session.execute(
+                select(MedicalRecord).where(MedicalRecord.patient_id == pat_profile.id)
+            )
+            if not res_med.scalars().first():
+                rec1 = MedicalRecord(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    category=RecordCategory.DIAGNOSIS,
+                    title="Essential Hypertension (Mild)",
+                    description="Well controlled on Lisinopril 10mg daily. Patient reports adherence without adverse symptoms.",
+                    icd10_code="I10",
+                    record_date=date(2026, 1, 15),
+                    status=RecordStatus.ACTIVE,
+                )
+                rec2 = MedicalRecord(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    category=RecordCategory.ALLERGY,
+                    title="Penicillin",
+                    description="Severe urticaria and angioedema reported upon pediatric exposure.",
+                    record_date=date(2020, 5, 10),
+                    status=RecordStatus.ACTIVE,
+                )
+                session.add_all([rec1, rec2])
+                await session.flush()
+                log.info("Seeded baseline medical records for Alice Johnson")
 
         await session.commit()
         log.info("Baseline clinical accounts verification/seeding completed successfully.")

@@ -93,6 +93,19 @@ async def update_appointment(
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
+    if current_user.role == UserRole.PATIENT:
+        p_stmt = select(Patient.id).where(Patient.user_id == current_user.id)
+        p_res = await db.execute(p_stmt)
+        my_patient_id = p_res.scalar_one_or_none()
+        if appt.patient_id != my_patient_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You cannot modify appointments for other patients")
+    elif current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        d_stmt = select(Doctor.id).where(Doctor.user_id == current_user.id)
+        d_res = await db.execute(d_stmt)
+        my_doc_id = d_res.scalar_one_or_none()
+        if appt.doctor_id != my_doc_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You can only modify appointments scheduled with you")
+
     update_data = payload.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(appt, field, value)
@@ -113,6 +126,19 @@ async def cancel_appointment(
     appt = result.scalar_one_or_none()
     if not appt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if current_user.role == UserRole.PATIENT:
+        p_stmt = select(Patient.id).where(Patient.user_id == current_user.id)
+        p_res = await db.execute(p_stmt)
+        my_patient_id = p_res.scalar_one_or_none()
+        if appt.patient_id != my_patient_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You cannot cancel appointments for other patients")
+    elif current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        d_stmt = select(Doctor.id).where(Doctor.user_id == current_user.id)
+        d_res = await db.execute(d_stmt)
+        my_doc_id = d_res.scalar_one_or_none()
+        if appt.doctor_id != my_doc_id:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden: You can only cancel appointments scheduled with you")
 
     appt.status = AppointmentStatus.CANCELLED
     await db.commit()
