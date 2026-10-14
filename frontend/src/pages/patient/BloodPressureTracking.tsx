@@ -13,12 +13,15 @@ import {
   Info,
   ChevronDown,
   Trash2,
+  Edit2,
   Calendar,
   Sparkles,
   PhoneCall,
   MapPin,
   ExternalLink,
+  X,
 } from 'lucide-react'
+import { TestModeConsole } from '@/components/vitals/TestModeConsole'
 import {
   ResponsiveContainer,
   LineChart,
@@ -62,6 +65,16 @@ export default function BloodPressureTracking() {
     message: string
     recommendation: string
   } | null>(null)
+
+  // Edit Reading State
+  const [editingReading, setEditingReading] = useState<VitalReading | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editForm, setEditForm] = useState({
+    systolic_bp: 120,
+    diastolic_bp: 80,
+    heart_rate: 72,
+    notes: '',
+  })
 
   // Log Form State
   const [formData, setFormData] = useState({
@@ -165,6 +178,35 @@ export default function BloodPressureTracking() {
       setReadings((prev) => prev.filter((r) => r.id !== id))
     } catch (err) {
       alert('Failed to delete reading.')
+    }
+  }
+
+  const handleOpenEdit = (r: VitalReading) => {
+    setEditingReading(r)
+    setEditForm({
+      systolic_bp: r.systolic_bp || 120,
+      diastolic_bp: r.diastolic_bp || 80,
+      heart_rate: r.heart_rate || 72,
+      notes: r.notes || '',
+    })
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingReading) return
+    try {
+      await api.put(`/api/v1/vitals/${editingReading.id}`, {
+        systolic_bp: Number(editForm.systolic_bp),
+        diastolic_bp: Number(editForm.diastolic_bp),
+        heart_rate: editForm.heart_rate ? Number(editForm.heart_rate) : undefined,
+        notes: editForm.notes,
+      })
+      setShowEditModal(false)
+      setEditingReading(null)
+      fetchReadings()
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to update reading')
     }
   }
 
@@ -273,6 +315,9 @@ export default function BloodPressureTracking() {
           <strong>Medical Device Standard:</strong> MediCare AI connects with validated clinical arm cuffs (Omron, Withings, Welch Allyn) or manual logs. We <em>never</em> claim that phone cameras, touchscreens, or optical flashlights measure diagnostic blood pressure.
         </div>
       </div>
+
+      {/* Clinical Test Mode Simulation Console */}
+      <TestModeConsole onSimulated={fetchReadings} compact={true} />
 
       {/* Emergency Alert Banner (if triggered) */}
       {alertBanner && (
@@ -606,7 +651,14 @@ export default function BloodPressureTracking() {
                     <td style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {r.notes || '—'}
                     </td>
-                    <td style={{ textAlign: 'right' }}>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => handleOpenEdit(r)}
+                        style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 4, marginRight: 6 }}
+                        title="Edit reading"
+                      >
+                        <Edit2 size={14} />
+                      </button>
                       <button
                         onClick={() => handleDelete(r.id)}
                         style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
@@ -800,6 +852,133 @@ export default function BloodPressureTracking() {
                   style={{ padding: '8px 20px' }}
                 >
                   {submitting ? 'Evaluating...' : 'Save & Evaluate'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Reading Modal */}
+      {showEditModal && editingReading && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: '#0d1d33',
+              border: '1px solid rgba(56,189,248,0.3)',
+              borderRadius: 16,
+              padding: 28,
+              maxWidth: 480,
+              width: '100%',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit2 size={18} color="#38bdf8" />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+                  Edit Blood Pressure Reading
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditModal(false)
+                  setEditingReading(null)
+                }}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                    Systolic (mmHg)
+                  </label>
+                  <input
+                    type="number"
+                    min="50"
+                    max="280"
+                    required
+                    value={editForm.systolic_bp}
+                    onChange={(e) => setEditForm({ ...editForm, systolic_bp: Number(e.target.value) })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)', fontSize: '1.1rem', fontWeight: 700 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                    Diastolic (mmHg)
+                  </label>
+                  <input
+                    type="number"
+                    min="30"
+                    max="180"
+                    required
+                    value={editForm.diastolic_bp}
+                    onChange={(e) => setEditForm({ ...editForm, diastolic_bp: Number(e.target.value) })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)', fontSize: '1.1rem', fontWeight: 700 }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                  Resting Pulse (bpm, optional)
+                </label>
+                <input
+                  type="number"
+                  min="30"
+                  max="220"
+                  value={editForm.heart_rate}
+                  onChange={(e) => setEditForm({ ...editForm, heart_rate: Number(e.target.value) })}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                  Notes
+                </label>
+                <input
+                  type="text"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false)
+                    setEditingReading(null)
+                  }}
+                  className="btn-secondary"
+                  style={{ padding: '8px 16px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ padding: '8px 20px' }}
+                >
+                  Save Changes
                 </button>
               </div>
             </form>

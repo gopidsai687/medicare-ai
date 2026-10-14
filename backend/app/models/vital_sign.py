@@ -126,7 +126,7 @@ class VitalSharingConsent(UUIDMixin, TimestampMixin, Base):
 
 
 class WebAuthnCredential(UUIDMixin, TimestampMixin, Base):
-    """Secure device-bound public key credentials for WebAuthn passkey re-authentication."""
+    """Secure device-bound public key credentials for WebAuthn passkey authentication."""
     __tablename__ = "webauthn_credentials"
 
     user_id: Mapped[uuid.UUID] = mapped_column(
@@ -136,10 +136,31 @@ class WebAuthnCredential(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
     credential_id: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
-    public_key: Mapped[str] = mapped_column(Text, nullable=False)
+    public_key: Mapped[str] = mapped_column(Text, nullable=False)  # Base64URL-encoded COSE public key bytes
     sign_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    device_name: Mapped[str | None] = mapped_column(String(150), nullable=True)  # e.g. "MacBook Touch ID", "Windows Hello"
+    device_name: Mapped[str | None] = mapped_column(String(150), default="Biometric Passkey", nullable=True)  # e.g. "Touch ID", "Windows Hello"
     aaguid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    transports: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class WebauthnChallenge(Base):
+    """
+    Stores server-generated cryptographic challenges for WebAuthn.
+    Short-lived (5 minutes TTL).
+    """
+    __tablename__ = "webauthn_challenges"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType(), nullable=True, index=True)
+    challenge: Mapped[str] = mapped_column(String(255), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(20), nullable=False)  # "registration" or "authentication"
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
 
 class AlertSeverity(str, enum.Enum):

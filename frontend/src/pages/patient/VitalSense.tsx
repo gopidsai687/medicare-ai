@@ -42,10 +42,23 @@ import {
 import { api } from '@/lib/api'
 import { format } from 'date-fns'
 import { BodyMap } from '@/components/vitals/BodyMap'
+import { TestModeConsole } from '@/components/vitals/TestModeConsole'
 
 // -----------------------------------------------------------------------------
 // Interfaces
 // -----------------------------------------------------------------------------
+interface VitalAlert {
+  id: string
+  alert_type: string
+  severity: string
+  title: string
+  message: string
+  clinical_recommendation?: string | null
+  triggered_value?: string | null
+  status: string
+  created_at: string
+}
+
 interface VitalSign {
   id: string
   patient_id: string
@@ -143,6 +156,20 @@ export default function VitalSense() {
   const [showConsentModal, setShowConsentModal] = useState(false)
   const [showBiometricModal, setShowBiometricModal] = useState(false)
   const [editingVital, setEditingVital] = useState<VitalSign | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [refreshKey, setRefreshKey] = useState(0)
+  const [alerts, setAlerts] = useState<VitalAlert[]>([])
+  const [editForm, setEditForm] = useState({
+    systolic_bp: 120,
+    diastolic_bp: 80,
+    heart_rate: 70,
+    blood_glucose: 100,
+    glucose_unit: 'mg/dL',
+    glucose_context: 'fasting',
+    weight: 65,
+    notes: '',
+  })
+
 
   // AI Trend State
   const [trendAnalysis, setTrendAnalysis] = useState<TrendAnalysisResponse | null>(null)
@@ -246,14 +273,75 @@ export default function VitalSense() {
     }
   }
 
+  const fetchAlerts = async () => {
+    try {
+      const res = await api.get('/api/v1/vitals/alerts?status=active')
+      setAlerts(res.data)
+    } catch (err) {
+      console.error('Failed to load clinical alerts:', err)
+    }
+  }
+
+  const handleAcknowledgeAlert = async (alertId: string) => {
+    try {
+      await api.post(`/api/v1/vitals/alerts/${alertId}/acknowledge`, {
+        follow_up_action: 'Reviewed by patient in VitalSense test console',
+      })
+      fetchAlerts()
+    } catch (err) {
+      console.error('Failed to acknowledge alert:', err)
+    }
+  }
+
+  const handleOpenEdit = (v: VitalSign) => {
+    setEditingVital(v)
+    setEditForm({
+      systolic_bp: v.systolic_bp || 120,
+      diastolic_bp: v.diastolic_bp || 80,
+      heart_rate: v.heart_rate || 70,
+      blood_glucose: v.blood_glucose || 100,
+      glucose_unit: v.glucose_unit || 'mg/dL',
+      glucose_context: v.glucose_context || 'fasting',
+      weight: v.weight || 65,
+      notes: v.notes || '',
+    })
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingVital) return
+    try {
+      await api.put(`/api/v1/vitals/${editingVital.id}`, {
+        systolic_bp: editingVital.systolic_bp != null ? Number(editForm.systolic_bp) : undefined,
+        diastolic_bp: editingVital.diastolic_bp != null ? Number(editForm.diastolic_bp) : undefined,
+        heart_rate: editForm.heart_rate ? Number(editForm.heart_rate) : undefined,
+        blood_glucose: editingVital.blood_glucose != null ? Number(editForm.blood_glucose) : undefined,
+        glucose_unit: editForm.glucose_unit,
+        glucose_context: editForm.glucose_context,
+        weight: editingVital.weight != null ? Number(editForm.weight) : undefined,
+        notes: editForm.notes,
+      })
+      setShowEditModal(false)
+      setEditingVital(null)
+      fetchVitals()
+      fetchAlerts()
+      setRefreshKey((k) => k + 1)
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to update telemetry reading')
+    }
+  }
+
   useEffect(() => {
     fetchVitals()
+    fetchAlerts()
   }, [timeFilter])
 
   useEffect(() => {
     fetchReminders()
     fetchConsents()
     checkBiometrics()
+    fetchAlerts()
   }, [])
 
   // ---------------------------------------------------------------------------
@@ -298,6 +386,8 @@ export default function VitalSense() {
         notes: '',
       })
       fetchVitals()
+      fetchAlerts()
+      setRefreshKey((k) => k + 1)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to record blood pressure')
     }
@@ -324,6 +414,8 @@ export default function VitalSense() {
         notes: '',
       })
       fetchVitals()
+      fetchAlerts()
+      setRefreshKey((k) => k + 1)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to record blood glucose')
     }
@@ -345,6 +437,8 @@ export default function VitalSense() {
       }
       setShowQuickModal(false)
       fetchVitals()
+      fetchAlerts()
+      setRefreshKey((k) => k + 1)
     } catch (err: any) {
       alert(err.response?.data?.detail || 'Failed to log telemetry')
     }
@@ -355,6 +449,8 @@ export default function VitalSense() {
     try {
       await api.delete(`/api/v1/vitals/${id}`)
       fetchVitals()
+      fetchAlerts()
+      setRefreshKey((k) => k + 1)
     } catch (err) {
       alert('Failed to delete entry')
     }
@@ -645,6 +741,84 @@ export default function VitalSense() {
         </div>
       </div>
 
+      {/* ── VitalSense Test & Clinical Simulation Console ──────────────── */}
+      <TestModeConsole
+        onSimulated={() => {
+          fetchVitals()
+          fetchAlerts()
+          setRefreshKey((k) => k + 1)
+        }}
+      />
+
+      {/* ── Active Clinical Alerts (Explainable Diagnostic Triggered Events) ── */}
+      {alerts.length > 0 && (
+        <div className="rounded-2xl border border-rose-500/40 bg-gradient-to-r from-rose-950/40 via-surface-900 to-amber-950/30 p-5 shadow-2xl backdrop-blur-md space-y-3">
+          <div className="flex items-center justify-between pb-2 border-b border-rose-500/20">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-ping" />
+              <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                Active Clinical Alerts ({alerts.length})
+              </h3>
+              <span className="text-xs text-rose-300 font-medium">Explainable Trigger Reason &amp; Timestamps</span>
+            </div>
+            <span className="text-[11px] text-slate-400">Deterministic Clinical Rules Engine</span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+            {alerts.map((alert) => (
+              <div
+                key={alert.id}
+                className={`p-3.5 rounded-xl border flex flex-col justify-between gap-2.5 transition-all ${
+                  alert.severity === 'critical' || alert.severity === 'crisis'
+                    ? 'bg-rose-950/60 border-rose-500/50 shadow-lg shadow-rose-950/50'
+                    : alert.severity === 'urgent'
+                    ? 'bg-amber-950/50 border-amber-500/40'
+                    : 'bg-slate-900/80 border-slate-700'
+                }`}
+              >
+                <div>
+                  <div className="flex items-start justify-between gap-2 mb-1.5">
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                      alert.severity === 'critical' || alert.severity === 'crisis'
+                        ? 'bg-rose-500/30 text-rose-300 border border-rose-500/50 animate-pulse'
+                        : alert.severity === 'urgent'
+                        ? 'bg-amber-500/30 text-amber-300 border border-amber-500/50'
+                        : 'bg-blue-500/30 text-blue-300 border border-blue-500/40'
+                    }`}>
+                      {alert.severity} • {alert.alert_type}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-mono flex items-center gap-1">
+                      <Clock size={11} />
+                      {format(new Date(alert.created_at), 'MMM d, h:mm a')}
+                    </span>
+                  </div>
+
+                  <h4 className="font-bold text-xs text-white mb-1">{alert.title}</h4>
+                  <div className="p-2 rounded-lg bg-black/40 border border-white/5 text-xs text-slate-200">
+                    <strong className="text-rose-400">Trigger Reason:</strong> {alert.message}
+                  </div>
+                  {alert.clinical_recommendation && (
+                    <p className="mt-1.5 text-[11px] text-slate-300 italic">
+                      Guidance: {alert.clinical_recommendation}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between pt-2 border-t border-white/10 text-[10px]">
+                  <span className="text-slate-400">Recorded: {format(new Date(alert.created_at), 'yyyy-MM-dd HH:mm:ss')}</span>
+                  <button
+                    onClick={() => handleAcknowledgeAlert(alert.id)}
+                    className="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-600 transition-colors cursor-pointer"
+                  >
+                    Acknowledge Alert
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* ── Key Clinical Metrics Cards ───────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Blood Pressure Card */}
@@ -781,7 +955,7 @@ export default function VitalSense() {
       </div>
 
       {/* ── Interactive Human-Body Health Map ───────────────────────────── */}
-      <BodyMap />
+      <BodyMap refreshKey={refreshKey} />
 
       {/* ── Filter & Navigation Bar ───────────────────────────────────────── */}
       <div className="glass p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">
@@ -1174,7 +1348,14 @@ export default function VitalSense() {
                         </div>
                       )}
                     </td>
-                    <td className="p-3.5 text-right">
+                    <td className="p-3.5 text-right flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => handleOpenEdit(v)}
+                        title="Edit telemetry entry"
+                        className="p-1 rounded hover:bg-blue-500/20 text-slate-400 hover:text-blue-400 transition-colors cursor-pointer"
+                      >
+                        <Edit2 size={14} />
+                      </button>
                       <button
                         onClick={() => handleDeleteVital(v.id)}
                         title="Delete telemetry entry"
@@ -1540,6 +1721,166 @@ export default function VitalSense() {
             <div className="p-3 rounded-xl bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400">
               <strong>Device Architecture Standards:</strong> All imported readings retain permanent hardware identifiers and are distinguished from manual patient entries in audit tables and clinician charts.
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Edit Telemetry Entry Modal ───────────────────────────────────── */}
+      {showEditModal && editingVital && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+          <div className="glass max-w-md w-full p-6 rounded-2xl border border-slate-700 bg-surface-900 shadow-2xl">
+            <div className="flex items-center justify-between mb-4 pb-2 border-b border-slate-800">
+              <h3 className="font-bold text-white flex items-center gap-2">
+                <Edit2 size={18} className="text-blue-400" /> Edit Telemetry Measurement
+              </h3>
+              <button
+                onClick={() => {
+                  setShowEditModal(false)
+                  setEditingVital(null)
+                }}
+                className="text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="space-y-4 text-xs">
+              {editingVital.systolic_bp != null && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-300 font-medium block mb-1">Systolic BP (mmHg)</label>
+                      <input
+                        type="number"
+                        min="50"
+                        max="280"
+                        required
+                        value={editForm.systolic_bp}
+                        onChange={(e) => setEditForm({ ...editForm, systolic_bp: Number(e.target.value) })}
+                        className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-medium block mb-1">Diastolic BP (mmHg)</label>
+                      <input
+                        type="number"
+                        min="30"
+                        max="180"
+                        required
+                        value={editForm.diastolic_bp}
+                        onChange={(e) => setEditForm({ ...editForm, diastolic_bp: Number(e.target.value) })}
+                        className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white font-bold"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-slate-300 font-medium block mb-1">Heart Rate (bpm)</label>
+                    <input
+                      type="number"
+                      min="30"
+                      max="220"
+                      value={editForm.heart_rate}
+                      onChange={(e) => setEditForm({ ...editForm, heart_rate: Number(e.target.value) })}
+                      className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white"
+                    />
+                  </div>
+                </div>
+              )}
+
+              {editingVital.blood_glucose != null && (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-slate-300 font-medium block mb-1">Blood Glucose ({editForm.glucose_unit})</label>
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="20"
+                        max="600"
+                        required
+                        value={editForm.blood_glucose}
+                        onChange={(e) => setEditForm({ ...editForm, blood_glucose: Number(e.target.value) })}
+                        className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white font-bold"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-slate-300 font-medium block mb-1">Unit</label>
+                      <select
+                        value={editForm.glucose_unit}
+                        onChange={(e) => setEditForm({ ...editForm, glucose_unit: e.target.value })}
+                        className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white"
+                      >
+                        <option value="mg/dL">mg/dL</option>
+                        <option value="mmol/L">mmol/L</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-slate-300 font-medium block mb-1">Meal Context</label>
+                    <select
+                      value={editForm.glucose_context}
+                      onChange={(e) => setEditForm({ ...editForm, glucose_context: e.target.value })}
+                      className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white"
+                    >
+                      <option value="fasting">Fasting</option>
+                      <option value="before_meal">Before Meal</option>
+                      <option value="after_meal">After Meal</option>
+                      <option value="bedtime">Bedtime</option>
+                    </select>
+                  </div>
+                </div>
+              )}
+
+              {editingVital.weight != null && (
+                <div>
+                  <label className="text-slate-300 font-medium block mb-1">Body Weight (kg)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="20"
+                    max="300"
+                    required
+                    value={editForm.weight}
+                    onChange={(e) => setEditForm({ ...editForm, weight: Number(e.target.value) })}
+                    className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white font-bold"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-slate-300 font-medium block mb-1">Telemetry Notes</label>
+                <input
+                  type="text"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white"
+                />
+              </div>
+
+              <div className="flex justify-between items-center pt-2">
+                <span className="text-[11px] text-slate-400">
+                  {editingVital.is_sample ? '🟣 Fictional Sample Data' : 'Verified Entry'}
+                </span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowEditModal(false)
+                      setEditingVital(null)
+                    }}
+                    className="px-4 py-2 rounded-xl bg-slate-800 text-slate-300 hover:bg-slate-700 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold cursor-pointer"
+                  >
+                    Save Changes
+                  </button>
+                </div>
+              </div>
+            </form>
           </div>
         </div>
       )}

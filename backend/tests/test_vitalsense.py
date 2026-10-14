@@ -368,3 +368,101 @@ async def test_reminders_crud():
         # Delete reminder
         del_res = await client.delete(f"/api/v1/vitals/reminders/{rem_id}", headers=headers)
         assert del_res.status_code == 204
+
+
+@pytest.mark.asyncio
+async def test_vitalsense_test_mode_simulation():
+    """Verify clinical test state simulations for demo & testing without real data contamination."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        # 1. Test Normal state simulation
+        norm_res = await client.post(
+            "/api/v1/vitals/test-mode/simulate",
+            headers=headers,
+            json={"state": "normal"},
+        )
+        assert norm_res.status_code == 200
+        norm_data = norm_res.json()
+        assert norm_data["status"] == "success"
+        assert norm_data["vital"]["is_sample"] is True
+        assert norm_data["vital"]["measurement_source"] == "SAMPLE_DATA"
+        assert norm_data["vital"]["bp_category"] == "Normal"
+
+        # 2. Test Attention state simulation
+        att_res = await client.post(
+            "/api/v1/vitals/test-mode/simulate",
+            headers=headers,
+            json={"state": "attention"},
+        )
+        assert att_res.status_code == 200
+        att_data = att_res.json()
+        assert att_data["vital"]["bp_category"] in ("Hypertension Stage 1", "Elevated")
+        assert att_data["vital"]["is_sample"] is True
+
+        # 3. Test Urgent crisis simulation & Alert explanations
+        urg_res = await client.post(
+            "/api/v1/vitals/test-mode/simulate",
+            headers=headers,
+            json={"state": "urgent"},
+        )
+        assert urg_res.status_code == 200
+        urg_data = urg_res.json()
+        assert urg_data["vital"]["bp_category"] == "Hypertensive Crisis"
+        assert urg_data["alerts_triggered"] > 0
+
+        # Check that alerts explain what triggered them and when
+        alerts_res = await client.get("/api/v1/vitals/alerts?status=active", headers=headers)
+        assert alerts_res.status_code == 200
+        active_alerts = alerts_res.json()
+        assert len(active_alerts) > 0
+        crisis_alert = next((a for a in active_alerts if a["severity"] in ("critical", "crisis", "urgent")), None)
+        assert crisis_alert is not None
+        assert "message" in crisis_alert and len(crisis_alert["message"]) > 0
+        assert "created_at" in crisis_alert and crisis_alert["created_at"] is not None
+
+        # Verify Body Map reflects urgent crisis
+        bm_res = await client.get("/api/v1/vitals/body-map", headers=headers)
+        assert bm_res.status_code == 200
+        bm_data = bm_res.json()
+        assert bm_data["indicators"]["cardiovascular"]["status"] == "urgent"
+        assert "Hypertensive Crisis" in bm_data["indicators"]["cardiovascular"]["headline"]
+
+        # 4. Test Stale data simulation (14 days old)
+        stale_res = await client.post(
+            "/api/v1/vitals/test-mode/simulate",
+            headers=headers,
+            json={"state": "stale"},
+        )
+        assert stale_res.status_code == 200
+        stale_data = stale_res.json()
+        assert stale_data["vital"]["is_sample"] is True
+
+        # 5. Test Editing a vital reading (PUT /vitals/{id})
+        vital_id = urg_data["vital"]["id"]
+        edit_res = await client.put(
+            f"/api/v1/vitals/{vital_id}",
+            headers=headers,
+            json={"systolic_bp": 118, "diastolic_bp": 76, "notes": "Corrected reading"},
+        )
+        assert edit_res.status_code == 200
+        assert edit_res.json()["systolic_bp"] == 118
+        assert edit_res.json()["bp_category"] == "Normal"
+
+        # 6. Test Clearing test data (missing-data validation)
+        clear_res = await client.post(
+            "/api/v1/vitals/test-mode/simulate",
+            headers=headers,
+            json={"state": "clear_test_data"},
+        )
+        assert clear_res.status_code == 200
+        assert clear_res.json()["state"] == "clear_test_data"
+        assert clear_res.json()["deleted_count"] >= 1
+
+

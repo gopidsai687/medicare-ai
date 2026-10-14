@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
   User,
   Shield,
@@ -14,14 +14,89 @@ import {
   Key,
   Smartphone,
   RefreshCw,
+  Fingerprint,
+  Trash2,
+  KeyRound,
+  ShieldCheck,
+  AlertCircle,
+  Plus,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
+import {
+  isPasskeySupported,
+  registerPasskey,
+  listUserPasskeys,
+  deleteUserPasskey,
+  PasskeyCredential,
+} from '@/lib/passkey'
 
 export default function PatientSettings() {
   const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<'profile' | 'insurance' | 'notifications' | 'security'>('profile')
   const [saveSuccess, setSaveSuccess] = useState('')
   const [isSaving, setIsSaving] = useState(false)
+
+  // Passkey / Biometrics state
+  const [passkeys, setPasskeys] = useState<PasskeyCredential[]>([])
+  const [isPasskeySupportedDevice, setIsPasskeySupportedDevice] = useState<boolean | null>(null)
+  const [isRegisteringPasskey, setIsRegisteringPasskey] = useState(false)
+  const [passkeyDeviceName, setPasskeyDeviceName] = useState('')
+  const [showAddPasskeyModal, setShowAddPasskeyModal] = useState(false)
+  const [passkeyError, setPasskeyError] = useState<string | null>(null)
+  const [passkeySuccess, setPasskeySuccess] = useState<string | null>(null)
+
+  // Check passkey support on mount
+  useEffect(() => {
+    isPasskeySupported().then(setIsPasskeySupportedDevice)
+  }, [])
+
+  // Load passkeys when switching to security tab
+  useEffect(() => {
+    if (activeTab === 'security') {
+      loadPasskeys()
+    }
+  }, [activeTab])
+
+  const loadPasskeys = async () => {
+    try {
+      const data = await listUserPasskeys()
+      setPasskeys(data)
+    } catch {
+      // silently ignore if unauthenticated or error
+    }
+  }
+
+  const handleRegisterPasskey = async () => {
+    setPasskeyError(null)
+    setPasskeySuccess(null)
+    setIsRegisteringPasskey(true)
+    try {
+      const result = await registerPasskey(passkeyDeviceName || undefined)
+      setPasskeySuccess(result.message || 'Passkey registered successfully!')
+      setShowAddPasskeyModal(false)
+      setPasskeyDeviceName('')
+      await loadPasskeys()
+      setTimeout(() => setPasskeySuccess(null), 5000)
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message ?? 'Registration cancelled or failed.'
+      setPasskeyError(msg)
+    } finally {
+      setIsRegisteringPasskey(false)
+    }
+  }
+
+  const handleDeletePasskey = async (id: string) => {
+    if (!window.confirm('Are you sure you want to revoke this passkey?')) return
+    try {
+      await deleteUserPasskey(id)
+      setPasskeys((prev) => prev.filter((p) => p.id !== id))
+      setPasskeySuccess('Passkey revoked successfully.')
+      setTimeout(() => setPasskeySuccess(null), 4000)
+    } catch (err: unknown) {
+      setPasskeyError((err as Error)?.message ?? 'Failed to revoke passkey.')
+    }
+  }
+
 
   // Profile fields
   const [fullName, setFullName] = useState(user?.full_name || 'Alice Johnson')
@@ -442,8 +517,157 @@ export default function PatientSettings() {
               />
             </label>
           </div>
+
+          {/* Biometric Passkey / Fingerprint Management Section */}
+          <div className="pt-6 border-t border-white/10 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Fingerprint size={18} className="text-teal-400" />
+                  Passkey & Biometric Credentials
+                </h3>
+                <p className="text-slate-400 text-[11px] mt-0.5">
+                  Sign in instantly with Windows Hello, Touch ID, Face ID, Android Biometrics, or physical FIDO2 keys.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setShowAddPasskeyModal(true)}
+                disabled={isPasskeySupportedDevice === false}
+                className="btn-primary self-start sm:self-auto inline-flex items-center gap-1.5 py-1.5 px-3 text-xs"
+                style={{ background: 'linear-gradient(135deg, #0ea5e9, #14b8a6)' }}
+              >
+                <Plus size={14} />
+                <span>Set up Passkey / Fingerprint Login</span>
+              </button>
+            </div>
+
+            {/* Hardware / Browser Compatibility Notice */}
+            {isPasskeySupportedDevice === false && (
+              <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400 flex items-start gap-2 text-[11px]">
+                <AlertCircle size={15} className="shrink-0 mt-0.5" />
+                <span>
+                  Your current browser or operating system does not support WebAuthn passkey biometrics.
+                  Please update your browser or use standard email and password authentication.
+                </span>
+              </div>
+            )}
+
+            {passkeySuccess && (
+              <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 flex items-center gap-2 text-xs animate-fade-in">
+                <CheckCircle2 size={16} className="shrink-0" />
+                <span>{passkeySuccess}</span>
+              </div>
+            )}
+
+            {passkeyError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 flex items-center gap-2 text-xs animate-fade-in">
+                <AlertCircle size={16} className="shrink-0" />
+                <span>{passkeyError}</span>
+              </div>
+            )}
+
+            {/* Modal for adding a passkey */}
+            {showAddPasskeyModal && (
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-teal-500/30 space-y-3 animate-fade-in">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-white text-xs flex items-center gap-1.5">
+                    <KeyRound size={14} className="text-teal-400" />
+                    Register New Biometric Authenticator
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddPasskeyModal(false); setPasskeyError(null); }}
+                    className="text-slate-400 hover:text-white text-xs"
+                  >
+                    Cancel
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-300">
+                  Enter a label for this device (e.g. "Work Laptop Windows Hello", "Personal iPhone Face ID"), then verify using your device's biometric sensor.
+                </p>
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <input
+                    type="text"
+                    value={passkeyDeviceName}
+                    onChange={(e) => setPasskeyDeviceName(e.target.value)}
+                    placeholder="e.g. My Windows Hello / MacBook Touch ID"
+                    className="flex-1 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-white text-xs focus:outline-none focus:border-teal-500/50"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleRegisterPasskey}
+                    disabled={isRegisteringPasskey}
+                    className="btn-primary inline-flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs shrink-0"
+                    style={{ background: 'linear-gradient(135deg, #0ea5e9, #14b8a6)' }}
+                  >
+                    {isRegisteringPasskey ? (
+                      <><RefreshCw size={13} className="animate-spin" /> Verifying Sensor…</>
+                    ) : (
+                      <><Fingerprint size={14} /> Verify Biometric Sensor</>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* List of registered passkeys */}
+            <div className="space-y-2">
+              {passkeys.length === 0 ? (
+                <div className="p-4 rounded-xl bg-white/5 border border-white/5 text-center text-slate-400 text-xs">
+                  <KeyRound size={20} className="mx-auto mb-1.5 text-slate-500" />
+                  No biometric passkeys registered yet. Click &ldquo;Set up Passkey / Fingerprint Login&rdquo; to add your device.
+                </div>
+              ) : (
+                passkeys.map((pk) => (
+                  <div
+                    key={pk.id}
+                    className="flex items-center justify-between p-3 rounded-xl bg-white/5 border border-white/5 hover:border-white/10 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg bg-teal-500/10 border border-teal-500/20 flex items-center justify-center text-teal-400 shrink-0">
+                        <Fingerprint size={16} />
+                      </div>
+                      <div>
+                        <span className="font-semibold text-white block text-xs">
+                          {pk.device_name || 'Biometric Authenticator'}
+                        </span>
+                        <span className="text-slate-400 text-[10px] block">
+                          Added: {new Date(pk.created_at).toLocaleDateString()}
+                          {pk.last_used_at && ` • Last used: ${new Date(pk.last_used_at).toLocaleDateString()}`}
+                        </span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeletePasskey(pk.id)}
+                      className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                      title="Revoke passkey"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+
+            {/* Privacy & Clinical Safety Disclaimer */}
+            <div className="p-3 rounded-xl bg-blue-500/5 border border-blue-500/15 text-slate-400 text-[10px] space-y-1">
+              <span className="font-semibold text-blue-400 block flex items-center gap-1.5">
+                <ShieldCheck size={13} />
+                Biometric Privacy Assurance
+              </span>
+              <p>
+                MediCare AI never stores, transmits, or possesses your fingerprint, facial scan, or biometric imagery.
+                Biometric authentication is handled exclusively by your hardware device operating system (Windows Hello / Apple Secure Enclave / Android Keystore), which produces cryptographically signed assertions verified on our backend.
+              </p>
+            </div>
+          </div>
         </div>
       )}
     </div>
   )
 }
+

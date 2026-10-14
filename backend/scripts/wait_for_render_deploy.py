@@ -5,11 +5,11 @@ import sys
 
 BASE = "https://medicare-ai-iv31.onrender.com"
 print("==================================================================", flush=True)
-print("Monitoring Render for Live Deployment of Commit 1a9efd1...", flush=True)
+print("Monitoring Render for Live Deployment of Commit 306b863...", flush=True)
 print("==================================================================", flush=True)
 
 deployed = False
-for attempt in range(1, 45):
+for attempt in range(1, 50):
     try:
         # Check login
         login_data = json.dumps({"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"}).encode()
@@ -18,27 +18,27 @@ for attempt in range(1, 45):
             data=login_data,
             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
         )
-        with urllib.request.urlopen(login_req, timeout=15) as res:
+        with urllib.request.urlopen(login_req, timeout=20) as res:
             token = json.loads(res.read().decode())["access_token"]
 
-        # Check if the new /vitals/reminders endpoint is active
-        rem_req = urllib.request.Request(
-            f"{BASE}/api/v1/vitals/reminders",
+        # Check if the new /vitals/body-map endpoint is active
+        bm_req = urllib.request.Request(
+            f"{BASE}/api/v1/vitals/body-map",
             headers={"Authorization": f"Bearer {token}", "User-Agent": "Mozilla/5.0"},
         )
-        with urllib.request.urlopen(rem_req, timeout=15) as res:
+        with urllib.request.urlopen(bm_req, timeout=20) as res:
             if res.status == 200:
-                print(f"\n>>> SUCCESS: Commit 1a9efd1 is DEPLOYED and ACTIVE on Render! (Attempt {attempt}) <<<\n", flush=True)
+                print(f"\n>>> SUCCESS: Commit 306b863 is DEPLOYED and ACTIVE on Render! (Attempt {attempt}) <<<\n", flush=True)
                 deployed = True
                 break
     except urllib.error.HTTPError as http_err:
-        print(f"[{attempt}/45] Status: HTTP {http_err.code} — Waiting for Render container build/swap...", flush=True)
+        print(f"[{attempt}/50] Status: HTTP {http_err.code} — Waiting for Render build to complete and swap container...", flush=True)
     except Exception as exc:
-        print(f"[{attempt}/45] Waiting... ({exc})", flush=True)
-    time.sleep(12)
+        print(f"[{attempt}/50] Waiting for Render... ({exc})", flush=True)
+    time.sleep(15)
 
 if not deployed:
-    print("Deployment timed out after 45 attempts. Please check Render dashboard build logs.", flush=True)
+    print("Deployment timed out after 50 attempts. Please check Render dashboard build logs.", flush=True)
     sys.exit(1)
 
 print("\n--- Running Live Production Verification Suite ---", flush=True)

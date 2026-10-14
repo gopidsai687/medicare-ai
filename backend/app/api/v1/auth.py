@@ -121,3 +121,139 @@ async def get_demo_status(db: Annotated[AsyncSession, Depends(get_db)]):
         }
     }
 
+
+# ── WebAuthn / Passkey Biometric Authentication ─────────────────────────────────
+from fastapi import Request
+from app.models.vital_sign import WebAuthnCredential
+from app.schemas.auth import (
+    PasskeyRegisterVerifyRequest,
+    PasskeyLoginOptionsRequest,
+    PasskeyLoginVerifyRequest,
+    PasskeyCredentialRead,
+)
+from app.services.webauthn_service import (
+    create_registration_options,
+    verify_registration,
+    create_authentication_options,
+    verify_authentication,
+)
+
+
+@router.post("/passkeys/register-options")
+async def passkey_register_options(
+    request: Request,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generates server-side challenge and WebAuthn options for registering a biometric passkey."""
+    return await create_registration_options(db, current_user, request)
+
+
+@router.post("/passkeys/register-verify")
+async def passkey_register_verify(
+    body: PasskeyRegisterVerifyRequest,
+    request: Request,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Verifies client attestation and registers passkey public key to the authenticated account."""
+    cred = await verify_registration(
+        db=db,
+        user=current_user,
+        credential_payload=body.credential,
+        challenge_id=body.challengeId,
+        request=request,
+        device_name=body.deviceName,
+    )
+    return {
+        "status": "success",
+        "message": "Biometric passkey registered successfully.",
+        "credential_id": cred.credential_id,
+        "device_name": cred.device_name,
+    }
+
+
+@router.get("/passkeys/credentials", response_model=list[PasskeyCredentialRead])
+async def list_user_passkeys(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Lists registered biometric passkeys for the current user."""
+    stmt = (
+        select(WebAuthnCredential)
+        .where(WebAuthnCredential.user_id == current_user.id)
+        .order_by(WebAuthnCredential.created_at.desc())
+    )
+    res = await db.execute(stmt)
+    creds = res.scalars().all()
+    return [
+        PasskeyCredentialRead(
+            id=str(c.id),
+            credential_id=c.credential_id,
+            device_name=c.device_name,
+            created_at=c.created_at.isoformat() if c.created_at else "",
+            last_used_at=c.last_used_at.isoformat() if c.last_used_at else None,
+        )
+        for c in creds
+    ]
+
+
+@router.delete("/passkeys/credentials/{cred_id}")
+async def delete_user_passkey(
+    cred_id: str,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Revokes a registered biometric passkey."""
+    from uuid import UUID
+    try:
+        parsed_id = UUID(cred_id)
+        stmt = select(WebAuthnCredential).where(
+            WebAuthnCredential.id == parsed_id,
+            WebAuthnCredential.user_id == current_user.id,
+        )
+    except ValueError:
+        stmt = select(WebAuthnCredential).where(
+            WebAuthnCredential.credential_id == cred_id,
+            WebAuthnCredential.user_id == current_user.id,
+        )
+    res = await db.execute(stmt)
+    cred = res.scalar_one_or_none()
+    if not cred:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Passkey credential not found.")
+
+    await db.delete(cred)
+    await db.commit()
+    return {"status": "success", "message": "Passkey revoked successfully."}
+
+
+@router.post("/passkeys/login-options")
+async def passkey_login_options(
+    body: PasskeyLoginOptionsRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Generates server-side challenge and options for passwordless passkey sign-in."""
+    return await create_authentication_options(db, body.email, request)
+
+
+@router.post("/passkeys/login-verify", response_model=TokenResponse)
+async def passkey_login_verify(
+    body: PasskeyLoginVerifyRequest,
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Verifies biometric assertion and authenticates the user into their authorized portal role."""
+    user, cred = await verify_authentication(
+        db=db,
+        credential_payload=body.credential,
+        challenge_id=body.challengeId,
+        request=request,
+    )
+    return TokenResponse(
+        access_token=create_access_token(str(user.id), user.role.value),
+        refresh_token=create_refresh_token(str(user.id)),
+        role=user.role.value,
+    )
+
+

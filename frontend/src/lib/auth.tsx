@@ -27,6 +27,7 @@ interface AuthState {
 
 interface AuthContextValue extends AuthState {
   login: (email: string, password: string) => Promise<AuthUser>
+  loginWithPasskey: (email?: string) => Promise<AuthUser>
   logout: () => void
   refreshUser: () => Promise<void>
 }
@@ -76,6 +77,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
+  const loginPasskey = useCallback(async (email?: string): Promise<AuthUser> => {
+    const { loginWithPasskey: doLogin } = await import('./passkey')
+    const data = await doLogin(email)
+    localStorage.setItem('access_token', data.access_token)
+    localStorage.setItem('refresh_token', data.refresh_token)
+    localStorage.setItem('user_role', data.role)
+    localStorage.removeItem('demo_user')
+    const meRes = await api.get<AuthUser>('/api/v1/auth/me')
+    setUser(meRes.data)
+    return meRes.data
+  }, [])
+
   const logout = useCallback(() => {
     localStorage.removeItem('access_token')
     localStorage.removeItem('refresh_token')
@@ -86,9 +99,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, isLoading, isAuthenticated: !!user, login, logout, refreshUser: fetchMe }),
-    [user, isLoading, login, logout, fetchMe]
+    () => ({ user, isLoading, isAuthenticated: !!user, login, loginWithPasskey: loginPasskey, logout, refreshUser: fetchMe }),
+    [user, isLoading, login, loginPasskey, logout, fetchMe]
   )
+
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

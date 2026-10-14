@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Eye, EyeOff, Shield, Stethoscope, User, AlertCircle, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Shield, Stethoscope, User, AlertCircle, Loader2, Fingerprint } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useAuth } from '@/lib/auth'
+import { isPasskeySupported } from '@/lib/passkey'
 import { BrandLogo } from '@/components/brand/BrandLogo'
 
 const schema = z.object({
@@ -26,7 +27,7 @@ const DEMO_CREDENTIALS: Record<string, { email: string; password: string }> = {
 }
 
 export default function LoginPage() {
-  const { login, user, isLoading: authLoading } = useAuth()
+  const { login, loginWithPasskey, user, isLoading: authLoading } = useAuth()
   const navigate = useNavigate()
   const location = useLocation()
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname
@@ -36,6 +37,8 @@ export default function LoginPage() {
   const [selectedPortal, setSelectedPortal] = useState(initialPortal)
   const [error, setError] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isPasskeyLoading, setIsPasskeyLoading] = useState(false)
+  const [passkeyNotice, setPasskeyNotice] = useState<string | null>(null)
 
   const roleMap: Record<string, string> = {
     patient: '/patient',
@@ -43,6 +46,37 @@ export default function LoginPage() {
     admin: '/admin',
     nurse: '/doctor',
   }
+
+  const handlePasskeySignIn = async () => {
+    setError(null)
+    setPasskeyNotice(null)
+
+    const supported = await isPasskeySupported()
+    if (!supported) {
+      setError('Your browser or device does not currently support WebAuthn / Passkey biometrics. Please use email and password.')
+      return
+    }
+
+    setIsPasskeyLoading(true)
+    try {
+      const currentEmail = DEMO_CREDENTIALS[selectedPortal]?.email
+      const authUser = await loginWithPasskey(currentEmail)
+      const verifiedRole = authUser?.role?.toLowerCase() || localStorage.getItem('user_role')?.toLowerCase() || 'patient'
+      const defaultPath = roleMap[verifiedRole] ?? '/patient'
+      const target = (from && from.startsWith(defaultPath)) ? from : defaultPath
+      navigate(target, { replace: true })
+    } catch (err: unknown) {
+      const msg = (err as Error)?.message ?? 'Passkey verification failed or was cancelled.'
+      if (msg.includes('cancelled') || msg.includes('AbortError')) {
+        setPasskeyNotice('Passkey sign-in cancelled by user.')
+      } else {
+        setError(msg)
+      }
+    } finally {
+      setIsPasskeyLoading(false)
+    }
+  }
+
 
   // Auto-redirect if user already has an active session
   useEffect(() => {
@@ -207,7 +241,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || isPasskeyLoading}
               className="btn-primary"
               style={{ width: '100%', justifyContent: 'center', fontSize: '0.9rem', padding: '12px' }}
             >
@@ -218,6 +252,51 @@ export default function LoginPage() {
               )}
             </button>
           </form>
+
+          {/* Passkey / Biometric Authentication Divider & Button */}
+          <div style={{ marginTop: 20, paddingTop: 18, borderTop: '1px solid rgba(255,255,255,0.08)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 14 }}>
+              <span style={{ fontSize: '0.72rem', color: '#5a7a9e', textTransform: 'uppercase', letterSpacing: '0.06em', background: 'rgba(15,32,64,0.7)', padding: '2px 10px', borderRadius: '12px' }}>
+                or biometric passkey
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePasskeySignIn}
+              disabled={isLoading || isPasskeyLoading}
+              style={{
+                width: '100%',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+                padding: '11px 16px',
+                borderRadius: 10,
+                background: 'rgba(14, 165, 233, 0.08)',
+                border: '1px solid rgba(14, 165, 233, 0.25)',
+                color: '#38bdf8',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+                transition: 'all 0.2s ease',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(14, 165, 233, 0.16)' }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(14, 165, 233, 0.08)' }}
+            >
+              {isPasskeyLoading ? (
+                <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Verifying with Authenticator…</>
+              ) : (
+                <><Fingerprint size={18} style={{ color: '#38bdf8' }} /> Sign in with Passkey / Fingerprint</>
+              )}
+            </button>
+
+            {passkeyNotice && (
+              <p style={{ textAlign: 'center', marginTop: 10, fontSize: '0.73rem', color: '#94a3b8' }}>
+                {passkeyNotice}
+              </p>
+            )}
+          </div>
 
           <p style={{ textAlign: 'center', marginTop: 20, fontSize: '0.75rem', color: '#3a5070' }}>
             Don't have an account?{' '}

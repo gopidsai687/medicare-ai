@@ -133,6 +133,7 @@ class BloodPressureLogRequest(BaseModel):
     measurement_source: str = Field("manual_entry", description="Source of reading")
     device_name: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = Field(None, max_length=500)
+    is_sample: bool = Field(False, description="Whether this reading is fictional sample/test data")
 
     @field_validator("diastolic_bp")
     @classmethod
@@ -151,6 +152,8 @@ class BloodGlucoseLogRequest(BaseModel):
     measurement_source: str = Field("manual_entry", description="Source of reading")
     device_name: Optional[str] = Field(None, max_length=100)
     notes: Optional[str] = Field(None, max_length=500)
+    is_sample: bool = Field(False, description="Whether this reading is fictional sample/test data")
+
 
     @model_validator(mode="after")
     def validate_glucose_range(self) -> "BloodGlucoseLogRequest":

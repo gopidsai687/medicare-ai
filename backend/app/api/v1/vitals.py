@@ -276,6 +276,7 @@ async def log_blood_pressure(
     patient_id = await _resolve_patient_id(db, current_user)
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
 
+    source = "SAMPLE_DATA" if payload.is_sample else payload.measurement_source
     vitals = VitalSign(
         patient_id=patient_id,
         recorded_by_id=current_user.id,
@@ -283,11 +284,11 @@ async def log_blood_pressure(
         systolic_bp=payload.systolic_bp,
         diastolic_bp=payload.diastolic_bp,
         heart_rate=payload.heart_rate,
-        measurement_source=payload.measurement_source,
+        measurement_source=source,
         device_name=payload.device_name,
         notes=payload.notes,
         is_patient_entered=True,
-        is_sample=False,
+        is_sample=payload.is_sample,
     )
     db.add(vitals)
     created_alerts = await evaluate_vital_reading(db, patient_id, vitals)
@@ -317,6 +318,7 @@ async def log_blood_glucose(
         glucose_mgdl = round(payload.blood_glucose, 1)
         glucose_mmol = round(payload.blood_glucose / 18.0182, 2)
 
+    source = "SAMPLE_DATA" if payload.is_sample else payload.measurement_source
     vitals = VitalSign(
         patient_id=patient_id,
         recorded_by_id=current_user.id,
@@ -325,11 +327,11 @@ async def log_blood_glucose(
         blood_glucose_mmol=glucose_mmol,
         glucose_unit=payload.glucose_unit,
         glucose_context=payload.glucose_context,
-        measurement_source=payload.measurement_source,
+        measurement_source=source,
         device_name=payload.device_name,
         notes=payload.notes,
         is_patient_entered=True,
-        is_sample=False,
+        is_sample=payload.is_sample,
     )
     db.add(vitals)
     created_alerts = await evaluate_vital_reading(db, patient_id, vitals)
@@ -337,6 +339,213 @@ async def log_blood_glucose(
     await db.refresh(vitals)
     primary_alert = created_alerts[0] if created_alerts else None
     return _enrich_vital_sign(vitals, alert=primary_alert)
+
+
+@router.put("/{vital_id}", response_model=VitalSignRead)
+async def update_vital_sign(
+    vital_id: uuid.UUID,
+    payload: VitalSignUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update an existing vital reading (BP, glucose, heart rate, weight, notes)."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    stmt = select(VitalSign).where(
+        VitalSign.id == vital_id,
+        VitalSign.patient_id == patient_id,
+    )
+    res = await db.execute(stmt)
+    vital = res.scalar_one_or_none()
+    if not vital:
+        raise HTTPException(status_code=404, detail="Vital reading not found")
+
+    if payload.recorded_at is not None:
+        vital.recorded_at = payload.recorded_at
+    if payload.systolic_bp is not None:
+        vital.systolic_bp = payload.systolic_bp
+    if payload.diastolic_bp is not None:
+        vital.diastolic_bp = payload.diastolic_bp
+    if payload.heart_rate is not None:
+        vital.heart_rate = payload.heart_rate
+    if payload.blood_glucose is not None:
+        if payload.glucose_unit == "mmol/L":
+            vital.blood_glucose = round(payload.blood_glucose * 18.0182, 1)
+            vital.blood_glucose_mmol = round(payload.blood_glucose, 2)
+        else:
+            vital.blood_glucose = round(payload.blood_glucose, 1)
+            vital.blood_glucose_mmol = round(payload.blood_glucose / 18.0182, 2)
+        vital.glucose_unit = payload.glucose_unit or "mg/dL"
+    if payload.glucose_context is not None:
+        vital.glucose_context = payload.glucose_context
+    if payload.weight is not None:
+        vital.weight = payload.weight
+    if payload.notes is not None:
+        vital.notes = payload.notes
+    if payload.clinical_notes is not None:
+        vital.clinical_notes = payload.clinical_notes
+
+    # Re-evaluate alerts
+    alerts = await evaluate_vital_reading(db, patient_id, vital)
+    await db.commit()
+    await db.refresh(vital)
+    primary_alert = alerts[0] if alerts else None
+    return _enrich_vital_sign(vital, alert=primary_alert)
+
+
+@router.delete("/{vital_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_vital_sign(
+    vital_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Delete a vital reading and clean up associated alerts."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    stmt = select(VitalSign).where(
+        VitalSign.id == vital_id,
+        VitalSign.patient_id == patient_id,
+    )
+    res = await db.execute(stmt)
+    vital = res.scalar_one_or_none()
+    if not vital:
+        raise HTTPException(status_code=404, detail="Vital reading not found")
+
+    from sqlalchemy import delete
+    await db.execute(delete(VitalAlert).where(VitalAlert.vital_id == vital_id))
+    await db.delete(vital)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/test-mode/simulate")
+async def simulate_clinical_test_state(
+    payload: Dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Simulates clinical test states (Normal, Attention, Urgent, Stale, or Clear)
+    with explicitly tagged fictional test telemetry (is_sample=True, measurement_source='SAMPLE_DATA').
+    Never fabricates real measurements or claims device sensor capability.
+    """
+    patient_id = await _resolve_patient_id(db, current_user)
+    state = (payload.get("state") or "normal").lower()
+    now = datetime.now(timezone.utc)
+
+    from sqlalchemy import delete
+    if state == "clear_test_data":
+        del_vitals_res = await db.execute(
+            delete(VitalSign).where(
+                VitalSign.patient_id == patient_id,
+                VitalSign.is_sample == True,
+            )
+        )
+        await db.commit()
+        return {
+            "status": "success",
+            "state": "clear_test_data",
+            "message": "Fictional test telemetry cleared. Demonstrating missing/unavailable data state.",
+            "deleted_count": del_vitals_res.rowcount,
+        }
+
+    vital = None
+    if state == "normal":
+        vital = VitalSign(
+            patient_id=patient_id,
+            recorded_by_id=current_user.id,
+            recorded_at=now,
+            systolic_bp=118,
+            diastolic_bp=76,
+            heart_rate=72,
+            blood_glucose=94.0,
+            blood_glucose_mmol=5.22,
+            glucose_unit="mg/dL",
+            glucose_context="fasting",
+            oxygen_saturation=98.5,
+            respiratory_rate=16,
+            measurement_source="SAMPLE_DATA",
+            device_name="Clinical Simulator (Normal Baseline)",
+            notes="Fictional test reading: Normal blood pressure & fasting glucose",
+            is_patient_entered=False,
+            is_sample=True,
+        )
+    elif state == "attention":
+        vital = VitalSign(
+            patient_id=patient_id,
+            recorded_by_id=current_user.id,
+            recorded_at=now,
+            systolic_bp=136,
+            diastolic_bp=86,
+            heart_rate=82,
+            blood_glucose=168.0,
+            blood_glucose_mmol=9.32,
+            glucose_unit="mg/dL",
+            glucose_context="after_meal",
+            oxygen_saturation=97.0,
+            respiratory_rate=18,
+            measurement_source="SAMPLE_DATA",
+            device_name="Clinical Simulator (Elevated / Stage 1)",
+            notes="Fictional test reading: Hypertension Stage 1 & elevated postprandial glucose",
+            is_patient_entered=False,
+            is_sample=True,
+        )
+    elif state == "urgent":
+        vital = VitalSign(
+            patient_id=patient_id,
+            recorded_by_id=current_user.id,
+            recorded_at=now,
+            systolic_bp=192,
+            diastolic_bp=124,
+            heart_rate=96,
+            blood_glucose=48.0,
+            blood_glucose_mmol=2.66,
+            glucose_unit="mg/dL",
+            glucose_context="fasting",
+            oxygen_saturation=94.0,
+            respiratory_rate=22,
+            measurement_source="SAMPLE_DATA",
+            device_name="Clinical Simulator (Urgent Crisis)",
+            notes="Fictional test reading: Hypertensive crisis (>180/120) & Severe Hypoglycemia (<54)",
+            is_patient_entered=False,
+            is_sample=True,
+        )
+    elif state == "stale":
+        stale_time = now - timedelta(days=14)
+        vital = VitalSign(
+            patient_id=patient_id,
+            recorded_by_id=current_user.id,
+            recorded_at=stale_time,
+            systolic_bp=120,
+            diastolic_bp=78,
+            heart_rate=70,
+            blood_glucose=98.0,
+            blood_glucose_mmol=5.44,
+            glucose_unit="mg/dL",
+            glucose_context="fasting",
+            measurement_source="SAMPLE_DATA",
+            device_name="Clinical Simulator (Stale Telemetry)",
+            notes="Fictional test reading: Recorded 14 days ago to evaluate stale telemetry alert",
+            is_patient_entered=False,
+            is_sample=True,
+        )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown test state: {state}. Supported states: normal, attention, urgent, stale, clear_test_data."
+        )
+
+    db.add(vital)
+    alerts = await evaluate_vital_reading(db, patient_id, vital)
+    await db.commit()
+    await db.refresh(vital)
+    primary_alert = alerts[0] if alerts else None
+    return {
+        "status": "success",
+        "state": state,
+        "message": f"Simulated {state.upper()} clinical test reading recorded successfully.",
+        "vital": _enrich_vital_sign(vital, alert=primary_alert),
+        "alerts_triggered": len(alerts),
+    }
+
 
 
 @router.post("/weight", response_model=VitalSignRead, status_code=status.HTTP_201_CREATED)
@@ -1508,13 +1717,26 @@ async def get_human_body_map(
     latest_resp = next((r for r in records if r.respiratory_rate is not None or r.oxygen_saturation is not None), None)
     latest_weight = next((r for r in records if r.weight is not None), None)
 
+    now = datetime.now(timezone.utc)
+    def _is_stale(dt: Optional[datetime], max_days: int = 7) -> bool:
+        if not dt:
+            return False
+        utc_dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return (now - utc_dt).total_seconds() > (max_days * 86400)
+
     indicators: Dict[str, BodyMapIndicator] = {}
 
     # Cardiovascular System
     if latest_bp:
         sbp, dbp = latest_bp.systolic_bp, latest_bp.diastolic_bp
         bp_cat = classify_blood_pressure(sbp, dbp)
-        if sbp > 180 or dbp > 120:
+        stale_bp = _is_stale(latest_bp.recorded_at, 7)
+        if stale_bp:
+            bp_status = "stale"
+            days_old = int((now - (latest_bp.recorded_at if latest_bp.recorded_at.tzinfo else latest_bp.recorded_at.replace(tzinfo=timezone.utc))).total_seconds() // 86400)
+            headline = f"Stale BP Telemetry: {sbp}/{dbp} mmHg ({days_old}d ago)"
+            guidance = f"Last blood pressure measurement was recorded {days_old} days ago. Clinical guidelines recommend regular tracking."
+        elif sbp > 180 or dbp > 120:
             bp_status = "urgent"
             headline = f"Hypertensive Crisis: {sbp}/{dbp} mmHg"
             guidance = "Seek immediate clinical evaluation."
@@ -1556,7 +1778,13 @@ async def get_human_body_map(
     # Heart (Cardiac)
     if latest_hr:
         hr = latest_hr.heart_rate
-        if hr > 120:
+        stale_hr = _is_stale(latest_hr.recorded_at, 7)
+        if stale_hr:
+            hr_status = "stale"
+            days_old = int((now - (latest_hr.recorded_at if latest_hr.recorded_at.tzinfo else latest_hr.recorded_at.replace(tzinfo=timezone.utc))).total_seconds() // 86400)
+            hr_head = f"Stale Heart Rate: {hr} BPM ({days_old}d ago)"
+            hr_guide = f"Last pulse recorded {days_old} days ago. Verify current resting heart rate."
+        elif hr > 120:
             hr_status = "attention"
             hr_head = f"High Resting Pulse: {hr} BPM"
             hr_guide = "Rest quietly and retest."
@@ -1596,7 +1824,13 @@ async def get_human_body_map(
         g_val = latest_glucose.blood_glucose
         g_unit = latest_glucose.glucose_unit or "mg/dL"
         g_cat = classify_blood_glucose(g_val, latest_glucose.glucose_context)
-        if g_val < 54:
+        stale_g = _is_stale(latest_glucose.recorded_at, 7)
+        if stale_g:
+            g_status = "stale"
+            days_old = int((now - (latest_glucose.recorded_at if latest_glucose.recorded_at.tzinfo else latest_glucose.recorded_at.replace(tzinfo=timezone.utc))).total_seconds() // 86400)
+            g_head = f"Stale Glucose: {g_val} {g_unit} ({days_old}d ago)"
+            g_guide = f"Last glucose logged {days_old} days ago. Regular testing supports optimal metabolic control."
+        elif g_val < 54:
             g_status = "urgent"
             g_head = f"Critical Low Glucose: {g_val} {g_unit}"
             g_guide = "Treat immediately with 15g fast-acting carbohydrates."
@@ -1677,10 +1911,14 @@ async def get_human_body_map(
         )
 
     # Overall Health Status Calculation
-    if any(ind.status == "urgent" for ind in indicators.values()):
+    if all(ind.status == "unavailable" for ind in indicators.values()):
+        overall = "missing_data"
+    elif any(ind.status == "urgent" for ind in indicators.values()):
         overall = "urgent_care_recommended"
     elif any(ind.status == "attention" for ind in indicators.values()):
         overall = "attention_needed"
+    elif any(ind.status == "stale" for ind in indicators.values()):
+        overall = "stale_monitoring"
     else:
         overall = "stable"
 

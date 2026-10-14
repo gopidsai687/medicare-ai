@@ -30,3 +30,4 @@ faker==33.1.0
 aiosqlite==0.22.1
 email-validator==2.3.0
 pypdf==6.20.0
+webauthn>=3.0.0

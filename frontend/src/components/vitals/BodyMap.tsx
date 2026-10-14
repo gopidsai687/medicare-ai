@@ -39,9 +39,10 @@ interface BodyMapProps {
   patientId?: string
   compact?: boolean
   onLogClick?: (measurementType: string) => void
+  refreshKey?: number
 }
 
-export function BodyMap({ patientId, compact = false, onLogClick }: BodyMapProps) {
+export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: BodyMapProps) {
   const [data, setData] = useState<{
     evaluated_at: string
     indicators: Record<string, BodyMapIndicator>
@@ -79,7 +80,7 @@ export function BodyMap({ patientId, compact = false, onLogClick }: BodyMapProps
 
   useEffect(() => {
     fetchBodyMap()
-  }, [patientId])
+  }, [patientId, refreshKey])
 
   const getStatusColor = (status?: string) => {
     switch (status) {

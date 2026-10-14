@@ -11,6 +11,7 @@ import {
   TrendingUp,
   Info,
   Trash2,
+  Edit2,
   Calendar,
   Sparkles,
   PhoneCall,
@@ -19,7 +20,9 @@ import {
   Moon,
   Sun,
   Activity,
+  X,
 } from 'lucide-react'
+import { TestModeConsole } from '@/components/vitals/TestModeConsole'
 import {
   ResponsiveContainer,
   LineChart,
@@ -64,6 +67,16 @@ export default function BloodGlucoseTracking() {
     message: string
     recommendation: string
   } | null>(null)
+
+  // Edit Reading State
+  const [editingReading, setEditingReading] = useState<VitalReading | null>(null)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editForm, setEditForm] = useState({
+    blood_glucose: 100,
+    unit: 'mg/dL',
+    context: 'fasting',
+    notes: '',
+  })
 
   // Log Form State
   const [formData, setFormData] = useState({
@@ -165,6 +178,38 @@ export default function BloodGlucoseTracking() {
       setReadings((prev) => prev.filter((r) => r.id !== id))
     } catch (err) {
       alert('Failed to delete reading.')
+    }
+  }
+
+  const handleOpenEdit = (r: VitalReading) => {
+    setEditingReading(r)
+    const val = displayUnit === 'mmol/L' && r.blood_glucose_mmol != null
+      ? r.blood_glucose_mmol
+      : r.blood_glucose || 100
+    setEditForm({
+      blood_glucose: val,
+      unit: displayUnit,
+      context: r.glucose_context || 'fasting',
+      notes: r.notes || '',
+    })
+    setShowEditModal(true)
+  }
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!editingReading) return
+    try {
+      await api.put(`/api/v1/vitals/${editingReading.id}`, {
+        blood_glucose: Number(editForm.blood_glucose),
+        glucose_unit: editForm.unit,
+        glucose_context: editForm.context,
+        notes: editForm.notes,
+      })
+      setShowEditModal(false)
+      setEditingReading(null)
+      fetchReadings()
+    } catch (err: any) {
+      alert(err.response?.data?.detail || 'Failed to update glucose reading')
     }
   }
 
@@ -331,6 +376,9 @@ export default function BloodGlucoseTracking() {
           <strong>Verified Glucose Ingestion:</strong> Readings are imported from FDA/CE cleared CGMs (Dexcom G7, Abbott FreeStyle Libre 3, Contour Next) or manual meter logs. We <em>never</em> claim that optical camera sensors or touchscreens measure blood sugar without clinical hardware.
         </div>
       </div>
+
+      {/* Clinical Test Mode Simulation Console */}
+      <TestModeConsole onSimulated={fetchReadings} compact={true} />
 
       {/* Emergency Alert Banner (if triggered) */}
       {alertBanner && (
@@ -695,7 +743,14 @@ export default function BloodGlucoseTracking() {
                     <td style={{ fontSize: '0.8rem', color: '#94a3b8', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                       {r.notes || '—'}
                     </td>
-                    <td style={{ textAlign: 'right' }}>
+                    <td style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <button
+                        onClick={() => handleOpenEdit(r)}
+                        style={{ background: 'none', border: 'none', color: '#38bdf8', cursor: 'pointer', padding: 4, marginRight: 6 }}
+                        title="Edit reading"
+                      >
+                        <Edit2 size={14} />
+                      </button>
                       <button
                         onClick={() => handleDelete(r.id)}
                         style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', padding: 4 }}
@@ -892,6 +947,135 @@ export default function BloodGlucoseTracking() {
                   style={{ padding: '8px 20px' }}
                 >
                   {submitting ? 'Evaluating...' : 'Save & Evaluate'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Reading Modal */}
+      {showEditModal && editingReading && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.75)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: '#0d1d33',
+              border: '1px solid rgba(56,189,248,0.3)',
+              borderRadius: 16,
+              padding: 28,
+              maxWidth: 480,
+              width: '100%',
+              boxShadow: '0 20px 50px rgba(0,0,0,0.6)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Edit2 size={18} color="#38bdf8" />
+                <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+                  Edit Blood Glucose Reading
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setShowEditModal(false)
+                  setEditingReading(null)
+                }}
+                style={{ background: 'none', border: 'none', color: '#64748b', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+                <div>
+                  <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                    Blood Glucose ({editForm.unit})
+                  </label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    min="20"
+                    max="600"
+                    required
+                    value={editForm.blood_glucose}
+                    onChange={(e) => setEditForm({ ...editForm, blood_glucose: Number(e.target.value) })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)', fontSize: '1.1rem', fontWeight: 700 }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                    Unit
+                  </label>
+                  <select
+                    value={editForm.unit}
+                    onChange={(e) => setEditForm({ ...editForm, unit: e.target.value })}
+                    style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}
+                  >
+                    <option value="mg/dL">mg/dL</option>
+                    <option value="mmol/L">mmol/L</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                  Meal Context (ADA Standard)
+                </label>
+                <select
+                  value={editForm.context}
+                  onChange={(e) => setEditForm({ ...editForm, context: e.target.value })}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  <option value="fasting">Fasting (&lt;100 Normal)</option>
+                  <option value="before_meal">Before Meal (70-130)</option>
+                  <option value="after_meal">After Meal (&lt;140 Normal)</option>
+                  <option value="bedtime">Bedtime (100-140)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500, display: 'block', marginBottom: 6 }}>
+                  Notes
+                </label>
+                <input
+                  type="text"
+                  value={editForm.notes}
+                  onChange={(e) => setEditForm({ ...editForm, notes: e.target.value })}
+                  style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowEditModal(false)
+                    setEditingReading(null)
+                  }}
+                  className="btn-secondary"
+                  style={{ padding: '8px 16px' }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="btn-primary"
+                  style={{ padding: '8px 20px' }}
+                >
+                  Save Changes
                 </button>
               </div>
             </form>
