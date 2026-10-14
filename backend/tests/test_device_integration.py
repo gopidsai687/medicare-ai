@@ -389,3 +389,151 @@ async def test_scientific_feasibility_report_endpoint():
         assert any("2024-02-21" in c["date"] for c in report["fda_safety_communications"])
         assert "ISO 15197" in str(report)
         assert "IEEE" in str(report)
+
+
+@pytest.mark.asyncio
+async def test_ble_glucometer_direct_ingest_success():
+    """Verify that a genuine fingerstick/CGM BLE device ingests valid glucose and mirrors to VitalSign."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        ble_payload = {
+            "device_name": "Accu-Chek Guide Me (BLE)",
+            "device_type": "fingerstick_glucometer",
+            "serial_number": "ACCUCHEK-BLE-TEST-001",
+            "manufacturer": "Roche Diabetes Care",
+            "blood_glucose": 105.0,
+            "glucose_unit": "mg/dL",
+            "glucose_context": "fasting",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        res = await client.post("/api/v1/devices/ble/ingest", headers=headers, json=ble_payload)
+        assert res.status_code == 201
+        data = res.json()
+        assert data["blood_glucose"] == 105.0
+        assert data["provenance"] == "MEASURED_DEVICE"
+        assert data["is_sample"] is False
+
+        # Verify VitalSign was created and enriched with mmol/L
+        vitals_res = await client.get("/api/v1/vitals?source=measured_device", headers=headers)
+        assert vitals_res.status_code == 200
+        vitals = vitals_res.json()
+        matching = [v for v in vitals if v["device_name"] == "Accu-Chek Guide Me (BLE)"]
+        assert len(matching) >= 1
+        assert matching[0]["blood_glucose"] == 105.0
+        assert matching[0]["blood_glucose_mmol"] == round(105.0 / 18.0182, 2)
+        assert matching[0]["is_sample"] is False
+
+
+@pytest.mark.asyncio
+async def test_ble_optical_glucose_rejection():
+    """Verify that attempting to report blood glucose from an unvalidated optical sensor over BLE is rejected."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        fake_optical_payload = {
+            "device_name": "Optical Smart Watch",
+            "device_type": "optical_smartwatch",  # Not a fingerstick or CGM
+            "serial_number": "OPTICAL-SMART-999",
+            "blood_glucose": 98.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        res = await client.post("/api/v1/devices/ble/ingest", headers=headers, json=fake_optical_payload)
+        assert res.status_code == 422
+        assert "clinical safety rejection" in res.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_ble_cuff_blood_pressure_direct_ingest_success():
+    """Verify that a validated pneumatic cuff BLE blood pressure monitor ingests readings and mirrors to VitalSign."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+
+        ble_bp_payload = {
+            "device_name": "Omron Platinum Upper Arm (BLE)",
+            "device_type": "cuff_blood_pressure_monitor",
+            "serial_number": "OMRON-PLAT-TEST-001",
+            "manufacturer": "OMRON Healthcare",
+            "systolic_bp": 122,
+            "diastolic_bp": 78,
+            "heart_rate": 68,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
+        res = await client.post("/api/v1/devices/ble/ingest", headers=headers, json=ble_bp_payload)
+        assert res.status_code == 201
+        data = res.json()
+        assert data["systolic_bp"] == 122
+        assert data["diastolic_bp"] == 78
+        assert data["heart_rate"] == 68
+        assert data["provenance"] == "MEASURED_DEVICE"
+        assert data["is_sample"] is False
+
+
+@pytest.mark.asyncio
+async def test_patient_device_data_isolation():
+    """Verify that Patient B cannot access or stream telemetry into Patient A's device."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Patient A (Alice) registers a device
+        alice_login = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        alice_token = alice_login.json()["access_token"]
+        alice_headers = {"Authorization": f"Bearer {alice_token}"}
+
+        reg_res = await client.post(
+            "/api/v1/devices/register",
+            headers=alice_headers,
+            json={
+                "device_name": "Alice Private Monitor",
+                "serial_number": f"ALICE-SECURE-{uuid.uuid4().hex[:8]}",
+                "protocol": "BLE",
+                "supports_heart_rate": True,
+            },
+        )
+        assert reg_res.status_code == 201
+        alice_device_id = reg_res.json()["id"]
+
+        # Patient B (Bob) logs in
+        bob_login = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "bob.smith@medicare.ai", "password": "PatientPass123!"},
+        )
+        bob_token = bob_login.json()["access_token"]
+        bob_headers = {"Authorization": f"Bearer {bob_token}"}
+
+        # Bob attempts to access Alice's device metadata
+        bob_get = await client.get(f"/api/v1/devices/{alice_device_id}", headers=bob_headers)
+        assert bob_get.status_code in (403, 404)
+
+        # Bob attempts to post telemetry to Alice's device
+        bob_telemetry = await client.post(
+            f"/api/v1/devices/{alice_device_id}/telemetry",
+            headers=bob_headers,
+            json={
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "heart_rate": 75,
+                "is_sample": False,
+            },
+        )
+        assert bob_telemetry.status_code in (403, 404)
+

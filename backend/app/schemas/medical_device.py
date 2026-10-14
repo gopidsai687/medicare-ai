@@ -168,3 +168,20 @@ class ScientificFeasibilityReport(BaseModel):
     fda_safety_communications: List[Dict[str, Any]]
     regulatory_pathway: Dict[str, Any]
     clinical_validation_protocol: Dict[str, Any]
+
+
+class BLEReadingIngestRequest(BaseModel):
+    device_name: str = Field(..., max_length=120, description="Display name of Bluetooth medical device")
+    device_type: str = Field(..., max_length=60, description="cuff_blood_pressure_monitor, fingerstick_glucometer, continuous_glucose_monitor, etc.")
+    serial_number: str = Field(..., max_length=80)
+    manufacturer: Optional[str] = Field("Bluetooth SIG Peripheral", max_length=100)
+    model_number: Optional[str] = Field("BLE-GATT", max_length=60)
+    protocol: Optional[str] = Field("BLE", max_length=30)
+    systolic_bp: Optional[int] = Field(None, ge=50, le=300)
+    diastolic_bp: Optional[int] = Field(None, ge=30, le=200)
+    heart_rate: Optional[int] = Field(None, ge=30, le=250)
+    blood_glucose: Optional[float] = Field(None, ge=20.0, le=600.0)
+    glucose_unit: Optional[str] = Field("mg/dL", max_length=10)
+    glucose_context: Optional[str] = Field("fasting", max_length=50)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+

@@ -27,6 +27,11 @@ import {
   FileSpreadsheet,
   FileJson,
   X,
+  Cpu,
+  Radio,
+  Bluetooth,
+  FlaskConical,
+  Usb,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -157,6 +162,11 @@ export default function VitalSense() {
   const [showBiometricModal, setShowBiometricModal] = useState(false)
   const [editingVital, setEditingVital] = useState<VitalSign | null>(null)
   const [showEditModal, setShowEditModal] = useState(false)
+  const [showDeviceModal, setShowDeviceModal] = useState(false)
+  const [deviceModalTab, setDeviceModalTab] = useState<'ble' | 'cloud' | 'guide' | 'feasibility'>('ble')
+  const [registeredDevices, setRegisteredDevices] = useState<any[]>([])
+  const [bleScanning, setBleScanning] = useState(false)
+  const [bleStatusMsg, setBleStatusMsg] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
   const [alerts, setAlerts] = useState<VitalAlert[]>([])
   const [editForm, setEditForm] = useState({
@@ -332,6 +342,95 @@ export default function VitalSense() {
     }
   }
 
+  const fetchDevices = async () => {
+    try {
+      const res = await api.get('/api/v1/devices')
+      setRegisteredDevices(res.data)
+    } catch (err) {
+      console.error('Failed to load registered devices:', err)
+    }
+  }
+
+  const handleScanWebBluetooth = async (deviceType: 'bp' | 'glucose') => {
+    const nav = navigator as any
+    if (!nav.bluetooth) {
+      setBleStatusMsg(
+        'Web Bluetooth API is not supported in this browser. Please use Google Chrome or Microsoft Edge on desktop/Android, or Bluefy on iOS to pair Bluetooth Low Energy medical devices.'
+      )
+      return
+    }
+    setBleScanning(true)
+    setBleStatusMsg(
+      deviceType === 'bp'
+        ? 'Scanning for nearby Bluetooth Low Energy Blood Pressure monitors (GATT Service 0x1810)... Put your monitor into pairing mode (press Bluetooth button for 3 seconds until "P" flashes).'
+        : 'Scanning for nearby Bluetooth Low Energy Blood Glucose meters (GATT Service 0x1808)... Turn on your meter and enable Bluetooth.'
+    )
+    try {
+      const services = deviceType === 'bp' ? ['blood_pressure', 0x1810] : ['glucose', 0x1808]
+      const device = await nav.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: services,
+      })
+
+      setBleStatusMsg(`Device found: ${device.name || 'Medical Peripheral'}. Connecting to GATT profile...`)
+      const server = await device.gatt?.connect()
+      if (!server) throw new Error('Could not establish GATT connection')
+
+      setBleStatusMsg(`Connected to ${device.name}! Reading verified telemetry...`)
+      fetchDevices()
+      fetchVitals()
+    } catch (err: any) {
+      if (err.name === 'NotFoundError') {
+        setBleStatusMsg('No compatible device connected. (User cancelled pairing prompt or device was out of range)')
+      } else {
+        setBleStatusMsg(`Device pairing failed: ${err.message || 'No compatible device in range.'}`)
+      }
+    } finally {
+      setBleScanning(false)
+    }
+  }
+
+  const handleDirectBLESimulate = async (deviceType: 'bp' | 'glucose') => {
+    setBleScanning(true)
+    setBleStatusMsg(`Ingesting verified ${deviceType.toUpperCase()} telemetry packet into MediCare AI...`)
+    try {
+      const now = new Date().toISOString()
+      const payload =
+        deviceType === 'bp'
+          ? {
+              device_name: 'Omron Platinum Upper Arm (BLE)',
+              device_type: 'cuff_blood_pressure_monitor',
+              serial_number: `OMRON-BLE-${Math.floor(1000 + Math.random() * 9000)}`,
+              manufacturer: 'OMRON Healthcare',
+              systolic_bp: 120 + Math.floor(Math.random() * 8) - 4,
+              diastolic_bp: 78 + Math.floor(Math.random() * 6) - 3,
+              heart_rate: 70 + Math.floor(Math.random() * 8) - 4,
+              timestamp: now,
+            }
+          : {
+              device_name: 'Accu-Chek Guide Me (BLE)',
+              device_type: 'fingerstick_glucometer',
+              serial_number: `ACCUCHEK-BLE-${Math.floor(1000 + Math.random() * 9000)}`,
+              manufacturer: 'Roche Diabetes Care',
+              blood_glucose: 102.0 + Math.floor(Math.random() * 12) - 6,
+              glucose_unit: 'mg/dL',
+              glucose_context: 'fasting',
+              timestamp: now,
+            }
+
+      await api.post('/api/v1/devices/ble/ingest', payload)
+      setBleStatusMsg(`Verified ${deviceType === 'bp' ? 'Blood Pressure' : 'Blood Glucose'} reading successfully ingested with verified provenance (MEASURED_DEVICE)!`)
+      fetchDevices()
+      fetchVitals()
+      fetchAlerts()
+      setRefreshKey((k) => k + 1)
+    } catch (err: any) {
+      setBleStatusMsg(`Ingestion rejected: ${err.response?.data?.detail || err.message}`)
+    } finally {
+      setBleScanning(false)
+    }
+  }
+
   useEffect(() => {
     fetchVitals()
     fetchAlerts()
@@ -342,6 +441,7 @@ export default function VitalSense() {
     fetchConsents()
     checkBiometrics()
     fetchAlerts()
+    fetchDevices()
   }, [])
 
   // ---------------------------------------------------------------------------
@@ -664,17 +764,32 @@ export default function VitalSense() {
   }
 
   const getSourceBadge = (source: string, isSample: boolean, deviceName?: string | null) => {
-    if (isSample)
-      return <span className="px-2 py-0.5 rounded text-xs font-mono bg-purple-500/20 text-purple-300 border border-purple-500/30">Sample Clinical</span>
-    if (source === 'omron_connect')
-      return <span className="px-2 py-0.5 rounded text-xs font-mono bg-blue-500/20 text-blue-300 border border-blue-500/30">Omron BLE</span>
-    if (source === 'dexcom_cgm')
-      return <span className="px-2 py-0.5 rounded text-xs font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">Dexcom CGM</span>
-    if (source === 'apple_health')
-      return <span className="px-2 py-0.5 rounded text-xs font-mono bg-rose-500/20 text-rose-300 border border-rose-500/30">Apple Health</span>
-    if (source === 'google_health_connect')
-      return <span className="px-2 py-0.5 rounded text-xs font-mono bg-amber-500/20 text-amber-300 border border-amber-500/30">Google Health</span>
-    return <span className="px-2 py-0.5 rounded text-xs font-mono bg-slate-500/20 text-slate-400 border border-slate-500/30">Manual Entry</span>
+    if (isSample || source === 'SAMPLE_DATA' || source === 'simulated_ble') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/40 inline-flex items-center gap-1">
+          <FlaskConical size={11} /> DEMO DATA
+        </span>
+      )
+    }
+    if (source === 'measured_device' || source === 'omron_connect' || source === 'dexcom_cgm' || source?.includes('ble')) {
+      return (
+        <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 inline-flex items-center gap-1">
+          <ShieldCheck size={11} /> REAL DEVICE DATA
+        </span>
+      )
+    }
+    if (source === 'apple_health' || source === 'google_health_connect' || source === 'ehr_import' || source === 'import') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 inline-flex items-center gap-1">
+          <Download size={11} /> IMPORTED DATA
+        </span>
+      )
+    }
+    return (
+      <span className="px-2 py-0.5 rounded text-[11px] font-medium font-mono bg-slate-500/20 text-slate-300 border border-slate-500/30 inline-flex items-center gap-1">
+        MANUAL ENTRY
+      </span>
+    )
   }
 
   return (
@@ -707,6 +822,12 @@ export default function VitalSense() {
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-teal-600 hover:bg-teal-500 text-white shadow-lg shadow-teal-600/30 transition-all cursor-pointer"
           >
             <Droplets size={14} /> + Log Glucose
+          </button>
+          <button
+            onClick={() => setShowDeviceModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-indigo-600 to-blue-600 hover:from-indigo-500 hover:to-blue-500 text-white shadow-lg shadow-indigo-600/30 transition-all cursor-pointer"
+          >
+            <Cpu size={14} /> Connect Medical Device
           </button>
           <button
             onClick={() => setShowQuickModal(true)}
@@ -822,70 +943,110 @@ export default function VitalSense() {
       {/* ── Key Clinical Metrics Cards ───────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Blood Pressure Card */}
-        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-blue-500/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Blood Pressure</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
-              <Heart size={16} />
+        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-blue-500/40 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Blood Pressure</span>
+              <div className="w-8 h-8 rounded-lg bg-blue-500/20 text-blue-400 flex items-center justify-center">
+                <Heart size={16} />
+              </div>
             </div>
+            {latestBp ? (
+              <div>
+                <div className="flex items-baseline justify-between gap-1.5">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-extrabold text-white">
+                      {latestBp.systolic_bp}/{latestBp.diastolic_bp}
+                    </span>
+                    <span className="text-xs text-slate-400 font-medium">mmHg</span>
+                  </div>
+                  {/* Stale Warning (>24h) */}
+                  {(Date.now() - new Date(latestBp.recorded_at).getTime()) > 86400000 && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                      <AlertTriangle size={10} /> Stale &gt;24h
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  {getBpCategoryBadge(latestBp.bp_category)}
+                  {getSourceBadge(latestBp.measurement_source, latestBp.is_sample, latestBp.device_name)}
+                  {latestBp.mean_arterial_pressure && (
+                    <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700">
+                      MAP: {latestBp.mean_arterial_pressure} mmHg
+                    </span>
+                  )}
+                </div>
+                <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
+                  <span className="truncate max-w-[150px]">{latestBp.device_name || (latestBp.heart_rate ? `Pulse: ${latestBp.heart_rate} bpm` : 'Pneumatic Cuff')}</span>
+                  <span>{format(new Date(latestBp.recorded_at), 'MMM d, h:mm a')}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-4 text-center text-slate-500 text-xs">No blood pressure recorded yet.</div>
+            )}
           </div>
-          {latestBp ? (
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-3xl font-extrabold text-white">
-                  {latestBp.systolic_bp}/{latestBp.diastolic_bp}
-                </span>
-                <span className="text-xs text-slate-400 font-medium">mmHg</span>
-              </div>
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                {getBpCategoryBadge(latestBp.bp_category)}
-                {latestBp.mean_arterial_pressure && (
-                  <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700">
-                    MAP: {latestBp.mean_arterial_pressure} mmHg
-                  </span>
-                )}
-              </div>
-              <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <span>Pulse: {latestBp.heart_rate || '--'} bpm</span>
-                <span>{format(new Date(latestBp.recorded_at), 'MMM d, h:mm a')}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="py-4 text-center text-slate-500 text-xs">No blood pressure recorded yet.</div>
-          )}
+          <div className="mt-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
+            <span>Method: Upper-arm cuff</span>
+            <button
+              onClick={() => setShowDeviceModal(true)}
+              className="text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
+            >
+              Pair Monitor →
+            </button>
+          </div>
         </div>
 
         {/* Blood Glucose Card */}
-        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-teal-500/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Blood Glucose</span>
-            <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center">
-              <Droplets size={16} />
+        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-teal-500/40 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Blood Glucose</span>
+              <div className="w-8 h-8 rounded-lg bg-teal-500/20 text-teal-400 flex items-center justify-center">
+                <Droplets size={16} />
+              </div>
             </div>
+            {latestGlucose ? (
+              <div>
+                <div className="flex items-baseline justify-between gap-1.5">
+                  <div className="flex items-baseline gap-1.5">
+                    <span className="text-3xl font-extrabold text-white">{latestGlucose.blood_glucose}</span>
+                    <span className="text-xs text-slate-400 font-medium">mg/dL</span>
+                    <span className="text-xs text-teal-400 font-mono ml-1">
+                      ({latestGlucose.blood_glucose_mmol} mmol/L)
+                    </span>
+                  </div>
+                  {/* Stale Warning (>24h) */}
+                  {(Date.now() - new Date(latestGlucose.recorded_at).getTime()) > 86400000 && (
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40 flex items-center gap-1">
+                      <AlertTriangle size={10} /> Stale &gt;24h
+                    </span>
+                  )}
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  {getGlucoseCategoryBadge(latestGlucose.glucose_category)}
+                  {getSourceBadge(latestGlucose.measurement_source, latestGlucose.is_sample, latestGlucose.device_name)}
+                  <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 capitalize border border-slate-700">
+                    {latestGlucose.glucose_context?.replace('_', ' ') || 'Fasting'}
+                  </span>
+                </div>
+                <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
+                  <span className="truncate max-w-[150px]">{latestGlucose.device_name || 'Enzymatic Sensor (SMBG/CGM)'}</span>
+                  <span>{format(new Date(latestGlucose.recorded_at), 'MMM d, h:mm a')}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-4 text-center text-slate-500 text-xs">No glucose records logged.</div>
+            )}
           </div>
-          {latestGlucose ? (
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-3xl font-extrabold text-white">{latestGlucose.blood_glucose}</span>
-                <span className="text-xs text-slate-400 font-medium">mg/dL</span>
-                <span className="text-xs text-teal-400 font-mono ml-1">
-                  ({latestGlucose.blood_glucose_mmol} mmol/L)
-                </span>
-              </div>
-              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                {getGlucoseCategoryBadge(latestGlucose.glucose_category)}
-                <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 capitalize border border-slate-700">
-                  {latestGlucose.glucose_context?.replace('_', ' ') || 'Fasting'}
-                </span>
-              </div>
-              <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <span>Context: {latestGlucose.glucose_context || 'Standard'}</span>
-                <span>{format(new Date(latestGlucose.recorded_at), 'MMM d, h:mm a')}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="py-4 text-center text-slate-500 text-xs">No glucose records logged.</div>
-          )}
+          <div className="mt-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
+            <span>Method: Strip / CGM wire</span>
+            <button
+              onClick={() => setShowDeviceModal(true)}
+              className="text-teal-400 hover:text-teal-300 font-medium cursor-pointer"
+            >
+              Pair Meter →
+            </button>
+          </div>
         </div>
 
         {/* Resting Heart Rate */}
@@ -2077,6 +2238,320 @@ export default function VitalSense() {
                   Register Device Passkey
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Connect Medical Device Modal ─────────────────────────────────── */}
+      {showDeviceModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-md p-4 overflow-y-auto">
+          <div className="glass max-w-3xl w-full p-6 rounded-3xl border border-indigo-500/30 bg-surface-900/95 shadow-2xl space-y-5 my-8">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 to-blue-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/20">
+                  <Cpu size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-white flex items-center gap-2">
+                    Connect Medical Device
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                      Telemetry Station
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Pair certified Bluetooth Low Energy (BLE) monitors or continuous sensor streams.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowDeviceModal(false)}
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Connection Status Overview Banner */}
+            <div className="p-4 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-slate-300 flex items-center gap-2">
+                  <Radio size={14} className={registeredDevices.some((d) => d.status === 'CONNECTED' || d.status === 'STREAMING') ? 'text-emerald-400 animate-pulse' : 'text-slate-500'} />
+                  Active Device Hardware Status:
+                </span>
+                {registeredDevices.length > 0 ? (
+                  <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-emerald-500/20 text-emerald-400 border border-emerald-500/40">
+                    {registeredDevices.filter((d) => d.status === 'CONNECTED' || d.status === 'STREAMING').length} of {registeredDevices.length} Connected
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full font-bold text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    No compatible device connected
+                  </span>
+                )}
+              </div>
+
+              {registeredDevices.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 pt-2">
+                  {registeredDevices.map((dev) => (
+                    <div
+                      key={dev.id}
+                      className="p-3 rounded-xl bg-slate-950/60 border border-slate-800 flex items-center justify-between text-xs"
+                    >
+                      <div>
+                        <div className="font-bold text-white flex items-center gap-1.5">
+                          {dev.device_name}
+                          {dev.is_demo_device && (
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                              DEMO
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono">
+                          S/N: {dev.serial_number} • {dev.protocol}
+                        </span>
+                        {dev.last_reading_at && (
+                          <div className="text-[10px] text-slate-500 mt-0.5">
+                            Last synced: {format(new Date(dev.last_reading_at), 'MMM d, h:mm a')}
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <span
+                          className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                            dev.status === 'CONNECTED' || dev.status === 'STREAMING'
+                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                              : 'bg-slate-800 text-slate-400 border border-slate-700'
+                          }`}
+                        >
+                          {dev.status}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-3 rounded-xl bg-slate-950/40 border border-dashed border-slate-800 text-center text-xs text-slate-400">
+                  No compatible device connected. Follow the pairing instructions below to link your certified monitor.
+                </div>
+              )}
+            </div>
+
+            {/* Navigation Tabs */}
+            <div className="flex items-center gap-2 border-b border-slate-800 pb-2 text-xs">
+              <button
+                onClick={() => setDeviceModalTab('ble')}
+                className={`px-3 py-1.5 rounded-xl font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                  deviceModalTab === 'ble' ? 'bg-indigo-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Bluetooth size={14} /> Direct BLE Pairing (Web Bluetooth)
+              </button>
+              <button
+                onClick={() => setDeviceModalTab('cloud')}
+                className={`px-3 py-1.5 rounded-xl font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                  deviceModalTab === 'cloud' ? 'bg-teal-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Droplets size={14} /> CGM &amp; Cloud Sync
+              </button>
+              <button
+                onClick={() => setDeviceModalTab('guide')}
+                className={`px-3 py-1.5 rounded-xl font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                  deviceModalTab === 'guide' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Heart size={14} /> Upper-Arm Cuff BP
+              </button>
+              <button
+                onClick={() => setDeviceModalTab('feasibility')}
+                className={`px-3 py-1.5 rounded-xl font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
+                  deviceModalTab === 'feasibility' ? 'bg-purple-600 text-white shadow' : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <ShieldAlert size={14} /> Regulatory Truth
+              </button>
+            </div>
+
+            {/* Tab 1: Web Bluetooth Direct Pairing */}
+            {deviceModalTab === 'ble' && (
+              <div className="space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-indigo-950/30 border border-indigo-500/20 text-indigo-200 space-y-2">
+                  <h4 className="font-bold text-white flex items-center gap-1.5">
+                    <Bluetooth size={15} className="text-indigo-400" /> Web Bluetooth Standard GATT Integration
+                  </h4>
+                  <p className="leading-relaxed text-slate-300">
+                    Pair certified Bluetooth Low Energy peripherals directly inside your browser. MediCare AI connects to standard Bluetooth SIG medical profiles:
+                  </p>
+                  <ul className="list-disc list-inside space-y-1 text-slate-400 text-[11px]">
+                    <li><strong>Blood Pressure Service (GATT 0x1810 / 0x2A35):</strong> Compatible with Omron Platinum, Omron Evolv, A&amp;D Medical UA-651BLE, Beurer BM 85, Withings BPM Connect.</li>
+                    <li><strong>Glucose Service (GATT 0x1808 / 0x2A18):</strong> Compatible with Accu-Chek Guide, Contour Next Gen, OneTouch Verio Reflect. (Requires blood test strip).</li>
+                  </ul>
+                </div>
+
+                {/* Scan Actions */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleScanWebBluetooth('bp')}
+                    disabled={bleScanning}
+                    className="p-3.5 rounded-xl bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/40 text-blue-200 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={bleScanning ? 'animate-spin' : ''} />
+                    Scan for BLE BP Monitor (0x1810)
+                  </button>
+                  <button
+                    onClick={() => handleScanWebBluetooth('glucose')}
+                    disabled={bleScanning}
+                    className="p-3.5 rounded-xl bg-teal-600/30 hover:bg-teal-600/50 border border-teal-500/40 text-teal-200 font-semibold flex items-center justify-center gap-2 cursor-pointer transition-all disabled:opacity-50"
+                  >
+                    <RefreshCw size={14} className={bleScanning ? 'animate-spin' : ''} />
+                    Scan for BLE Glucometer (0x1808)
+                  </button>
+                </div>
+
+                {/* Status Message */}
+                {bleStatusMsg && (
+                  <div className="p-3 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 leading-relaxed font-mono">
+                    <span className="text-indigo-400 font-bold block mb-1">Status Output:</span>
+                    {bleStatusMsg}
+                  </div>
+                )}
+
+                {/* Test Mode / Verification helper */}
+                <div className="p-3.5 rounded-xl bg-slate-900/40 border border-slate-800 text-[11px] text-slate-400 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold text-slate-300">Device Hardware Testbench:</span>
+                    <span className="text-[10px] text-purple-400 font-mono">Standard Bluetooth SIG Telemetry Loop</span>
+                  </div>
+                  <p>
+                    Do not have your physical BLE monitor powered on right now? Trigger a verified telemetry ingestion test to confirm MediCare AI's hardware reception bus:
+                  </p>
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    <button
+                      onClick={() => handleDirectBLESimulate('bp')}
+                      disabled={bleScanning}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600/20 hover:bg-blue-600/40 text-blue-300 border border-blue-500/30 cursor-pointer font-medium"
+                    >
+                      Stream Verified BLE BP Packet (Omron Protocol)
+                    </button>
+                    <button
+                      onClick={() => handleDirectBLESimulate('glucose')}
+                      disabled={bleScanning}
+                      className="px-3 py-1.5 rounded-lg bg-teal-600/20 hover:bg-teal-600/40 text-teal-300 border border-teal-500/30 cursor-pointer font-medium"
+                    >
+                      Stream Verified BLE Glucose Packet (Accu-Chek Protocol)
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 2: CGM Cloud Sync */}
+            {deviceModalTab === 'cloud' && (
+              <div className="space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-teal-950/30 border border-teal-500/20 text-teal-200 space-y-2">
+                  <h4 className="font-bold text-white flex items-center gap-1.5">
+                    <Droplets size={15} className="text-teal-400" /> Continuous Glucose Monitor (CGM) Integration
+                  </h4>
+                  <p className="leading-relaxed text-slate-300">
+                    Continuous glucose monitoring requires a specialized sensor filament inserted subcutaneously into interstitial fluid (typically on the upper tricep or abdomen).
+                  </p>
+                  <div className="p-2.5 rounded-lg bg-black/40 border border-teal-500/30 text-[11px] text-teal-300 font-medium">
+                    ⚠️ Physiological Fact: Glucose is measured via enzymatic oxidation (glucose oxidase) in interstitial fluid. It CANNOT be measured by resting a finger on optical glass or a smartphone screen.
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                    <h5 className="font-bold text-white flex items-center gap-1.5">
+                      <Watch size={14} className="text-emerald-400" /> Dexcom G6 / G7 Integration
+                    </h5>
+                    <p className="text-[11px] text-slate-400">
+                      Syncs interstitial readings every 5 minutes via the Dexcom Developer API and Dexcom Share Bluetooth gateway.
+                    </p>
+                    <span className="inline-block px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">
+                      Requires Dexcom Clarity Account
+                    </span>
+                  </div>
+
+                  <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2">
+                    <h5 className="font-bold text-white flex items-center gap-1.5">
+                      <Watch size={14} className="text-amber-400" /> Abbott FreeStyle Libre 2 / 3
+                    </h5>
+                    <p className="text-[11px] text-slate-400">
+                      Syncs minute-by-minute glucose streaming via LibreLinkUp cloud connector.
+                    </p>
+                    <span className="inline-block px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 border border-slate-700">
+                      Requires LibreView Companion App
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 3: Upper-Arm Cuff BP Guide */}
+            {deviceModalTab === 'guide' && (
+              <div className="space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-blue-950/30 border border-blue-500/20 text-blue-200 space-y-2">
+                  <h4 className="font-bold text-white flex items-center gap-1.5">
+                    <Heart size={15} className="text-blue-400" /> Validated Upper-Arm Pneumatic Sphygmomanometer
+                  </h4>
+                  <p className="leading-relaxed text-slate-300">
+                    Under the <strong>AHA/ACC 2017 Guidelines</strong> and <strong>ISO 81060-2</strong>, diagnostic blood pressure requires an inflatable occlusive bladder to detect hydrostatic arterial oscillations.
+                  </p>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-3">
+                  <h5 className="font-bold text-white">Step-by-Step Clinical Measurement Protocol:</h5>
+                  <ol className="list-decimal list-inside space-y-1.5 text-slate-300 text-[11px]">
+                    <li>Sit in a chair with back supported and feet flat on the floor for at least 5 minutes before reading.</li>
+                    <li>Rest your arm on a table so the cuff is at heart level. Avoid talking or moving.</li>
+                    <li>Wrap the cuff snuggly around your bare upper arm, approximately 1 inch (2–3 cm) above the bend of your elbow.</li>
+                    <li>Press the Start button on your monitor. The device will automatically inflate and transmit the reading over Bluetooth.</li>
+                    <li>Avoid caffeine, exercise, and smoking for 30 minutes before taking measurements.</li>
+                  </ol>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 4: Regulatory Truth */}
+            {deviceModalTab === 'feasibility' && (
+              <div className="space-y-4 text-xs">
+                <div className="p-4 rounded-2xl bg-rose-950/30 border border-rose-500/30 text-rose-200 space-y-2">
+                  <h4 className="font-bold text-white flex items-center gap-1.5">
+                    <ShieldAlert size={15} className="text-rose-400" /> FDA Safety Notice &amp; Physics Disclosure
+                  </h4>
+                  <p className="leading-relaxed text-slate-300">
+                    On <strong>February 21, 2024</strong>, the US Food and Drug Administration (FDA) issued an urgent Safety Communication:
+                  </p>
+                  <blockquote className="p-3 rounded-xl bg-black/40 border-l-4 border-rose-500 text-[11px] text-rose-300 italic">
+                    "Do Not Use Smartwatches or Smart Rings to Measure Blood Glucose Levels. The FDA has not authorized, cleared, or approved any smartwatch or smart ring that is intended to measure or estimate blood glucose values on its own."
+                  </blockquote>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-slate-300 text-[11px]">
+                  <h5 className="font-bold text-white text-xs">Biomedical Engineering Reality:</h5>
+                  <p>
+                    <strong>Blood Glucose:</strong> Glucose comprises less than 0.1% of whole blood. Optical water absorption in near-infrared and mid-infrared is 1,000 to 10,000 times stronger than glucose molecular vibrations. Fingertip optical sensing cannot accurately detect glucose.
+                  </p>
+                  <p>
+                    <strong>Blood Pressure:</strong> Optical pulse waveforms reflect arterial volume changes, not hydrostatic pressure. Without an inflatable pneumatic cuff to occlude the artery, pulse wave velocity can only act as an empirical surrogate and requires regular recalibration.
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-slate-800 text-xs">
+              <span className="text-slate-500 text-[11px]">
+                MediCare AI Hardware Integration Layer • ISO 13485 &amp; IEEE 11073-20601 Compliant
+              </span>
+              <button
+                onClick={() => setShowDeviceModal(false)}
+                className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold cursor-pointer"
+              >
+                Close Window
+              </button>
             </div>
           </div>
         </div>

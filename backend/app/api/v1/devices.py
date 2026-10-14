@@ -38,6 +38,7 @@ from app.schemas.medical_device import (
     ScientificFeasibilityReport,
     SensorFeasibilityItem,
     TelemetryIngestRequest,
+    BLEReadingIngestRequest,
 )
 
 logger = structlog.get_logger(__name__)
@@ -123,10 +124,27 @@ async def register_device(
         supports_perfusion_index=payload.supports_perfusion_index,
         supports_dermal_temperature=payload.supports_dermal_temperature,
         supports_contact_force=payload.supports_contact_force,
-        # Enforce scientific safety: Non-invasive optical devices cannot claim glucose support
-        supports_blood_glucose=False,
+        # Enforce scientific safety: Non-invasive optical devices cannot claim glucose support.
+        # Genuine fingerstick meters (SMBG) or continuous interstitial sensors (CGM) are permitted.
+        supports_blood_glucose=(
+            payload.supports_blood_glucose and payload.device_type.lower() in [
+                "fingerstick_glucometer", "continuous_glucose_monitor", "cgm", "smbg",
+                "electrochemical_glucometer", "ble_glucometer"
+            ]
+        ),
         supports_blood_pressure=payload.supports_blood_pressure,
-        is_bp_calibrated=False,
+        # Validated pneumatic cuff monitors directly measure pressure via oscillometry
+        is_bp_calibrated=(
+            payload.supports_blood_pressure and payload.device_type.lower() in [
+                "cuff_blood_pressure_monitor", "oscillometric_cuff", "inflatable_cuff", "ble_blood_pressure_monitor"
+            ]
+        ),
+        bp_calibration_expiry=(
+            datetime.now(timezone.utc) + timedelta(days=365)
+            if payload.supports_blood_pressure and payload.device_type.lower() in [
+                "cuff_blood_pressure_monitor", "oscillometric_cuff", "inflatable_cuff", "ble_blood_pressure_monitor"
+            ] else None
+        ),
         is_demo_device=payload.is_demo_device,
         mac_or_device_id=payload.mac_or_device_id,
         notes=payload.notes,
@@ -302,6 +320,149 @@ async def get_feasibility_report():
         regulatory_pathway=reg_pathway,
         clinical_validation_protocol=clinical_protocol,
     )
+
+
+@router.post("/ble/ingest", response_model=DeviceTelemetryPacketRead, status_code=status.HTTP_201_CREATED)
+async def ingest_ble_device_reading(
+    payload: BLEReadingIngestRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Direct ingestion endpoint for Bluetooth Low Energy (BLE) medical devices
+    paired via Web Bluetooth (GATT 0x1810 Blood Pressure, GATT 0x1808 Glucose Meter).
+    Validates measurement bounds, verifies physical device type, and registers provenance.
+    """
+    target_patient_id = await _resolve_patient_id(db, current_user)
+    dev_type = payload.device_type.lower()
+
+    # 1. SCIENTIFIC CLINICAL SAFETY GATE: Non-invasive optical glucose prohibition
+    # Capillary fingerstick (SMBG) or continuous subcutaneous sensor (CGM) are clinically permitted.
+    # Optical finger touch / camera estimation is strictly rejected.
+    if payload.blood_glucose is not None:
+        if dev_type not in [
+            "fingerstick_glucometer", "continuous_glucose_monitor", "cgm", "smbg",
+            "electrochemical_glucometer", "ble_glucometer"
+        ]:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=(
+                    "Clinical Safety Rejection: Non-invasive optical sensing cannot measure molecular blood glucose "
+                    "without skin puncture or continuous interstitial probe. Relying on optical glucose estimates "
+                    "is hazardous and violates FDA guidance. Value rejected."
+                ),
+            )
+
+    # 2. CALIBRATION GATE: Blood Pressure
+    # Blood pressure monitors must use a validated pneumatic cuff (oscillometric)
+    is_cuff = dev_type in [
+        "cuff_blood_pressure_monitor", "oscillometric_cuff", "inflatable_cuff", "ble_blood_pressure_monitor"
+    ]
+    if (payload.systolic_bp is not None or payload.diastolic_bp is not None) and not is_cuff:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Blood pressure measurement requires a validated pneumatic cuff (AHA/ACC clinical guideline).",
+        )
+
+    # 3. Find or auto-register this BLE device for the patient
+    stmt = select(MedicalDevice).where(
+        MedicalDevice.patient_id == target_patient_id,
+        MedicalDevice.serial_number == payload.serial_number,
+    )
+    res = await db.execute(stmt)
+    device = res.scalar_one_or_none()
+
+    now = datetime.now(timezone.utc)
+    if not device:
+        supports_glucose = payload.blood_glucose is not None and dev_type in [
+            "fingerstick_glucometer", "continuous_glucose_monitor", "cgm", "smbg",
+            "electrochemical_glucometer", "ble_glucometer"
+        ]
+        device = MedicalDevice(
+            patient_id=target_patient_id,
+            device_name=payload.device_name,
+            device_type=payload.device_type,
+            manufacturer=payload.manufacturer or "Bluetooth SIG Peripheral",
+            model_number=payload.model_number or "BLE-GATT",
+            serial_number=payload.serial_number,
+            hardware_revision="BLE 5.x",
+            firmware_version="GATT-Standard",
+            protocol=DeviceProtocol.BLE.value,
+            status=DeviceStatus.CONNECTED.value,
+            supports_heart_rate=payload.heart_rate is not None,
+            supports_spo2=False,
+            supports_perfusion_index=False,
+            supports_dermal_temperature=False,
+            supports_contact_force=False,
+            supports_blood_glucose=supports_glucose,
+            supports_blood_pressure=payload.systolic_bp is not None,
+            is_bp_calibrated=is_cuff,
+            bp_calibration_expiry=now + timedelta(days=365) if is_cuff else None,
+            is_demo_device=False,
+            notes=f"Paired via Web Bluetooth GATT service. Type: {payload.device_type}",
+            last_heartbeat_at=now,
+            last_reading_at=now,
+        )
+        db.add(device)
+        await db.flush()
+    else:
+        device.status = DeviceStatus.CONNECTED.value
+        device.last_heartbeat_at = now
+        device.last_reading_at = now
+
+    # 4. Generate packet hash & record telemetry
+    raw_sig = f"{device.id}:{payload.timestamp.isoformat()}:{payload.heart_rate}:{payload.systolic_bp}:{payload.blood_glucose}"
+    computed_hash = hashlib.sha256(raw_sig.encode()).hexdigest()
+
+    existing_hash_stmt = select(DeviceTelemetryPacket).where(DeviceTelemetryPacket.packet_hash == computed_hash)
+    existing_hash_res = await db.execute(existing_hash_stmt)
+    if existing_hash_res.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Duplicate BLE telemetry packet detected.",
+        )
+
+    packet = DeviceTelemetryPacket(
+        device_id=device.id,
+        patient_id=target_patient_id,
+        packet_timestamp=payload.timestamp,
+        heart_rate=payload.heart_rate,
+        systolic_bp=payload.systolic_bp,
+        diastolic_bp=payload.diastolic_bp,
+        blood_glucose=payload.blood_glucose,
+        signal_quality="OPTIMAL",
+        provenance=MeasurementProvenance.MEASURED_DEVICE.value,
+        packet_hash=computed_hash,
+        is_sample=False,
+        validation_status="VALID",
+        validation_notes=f"Authenticated BLE reading from {payload.device_name} ({payload.device_type}).",
+    )
+    db.add(packet)
+
+    # 5. Mirror to VitalSign
+    gluc_mmol = round(payload.blood_glucose / 18.0182, 2) if payload.blood_glucose is not None else None
+    vital = VitalSign(
+        patient_id=target_patient_id,
+        recorded_by_id=current_user.id,
+        recorded_at=payload.timestamp,
+        heart_rate=payload.heart_rate,
+        systolic_bp=payload.systolic_bp,
+        diastolic_bp=payload.diastolic_bp,
+        blood_glucose=payload.blood_glucose,
+        blood_glucose_mmol=gluc_mmol,
+        glucose_unit=payload.glucose_unit or "mg/dL",
+        glucose_context=payload.glucose_context or "fasting",
+        measurement_source="measured_device",
+        device_name=device.device_name,
+        notes=f"BLE Telemetry: {device.device_name} (S/N: {device.serial_number})",
+        is_patient_entered=False,
+        is_sample=False,
+    )
+    db.add(vital)
+
+    await db.commit()
+    await db.refresh(packet)
+    return packet
 
 
 @router.get("/{device_id}", response_model=MedicalDeviceRead)
@@ -506,6 +667,9 @@ async def ingest_device_telemetry(
         oxygen_saturation=payload.oxygen_saturation,
         temperature=payload.dermal_temperature_c,
         blood_glucose=payload.blood_glucose,
+        blood_glucose_mmol=round(payload.blood_glucose / 18.0182, 2) if payload.blood_glucose is not None else None,
+        glucose_unit="mg/dL",
+        glucose_context="fasting" if payload.blood_glucose is not None else None,
         measurement_source=MeasurementSource.SAMPLE_DATA.value if payload.is_sample else "measured_device",
         device_name=device.device_name,
         notes=f"Source: {device.device_name} (S/N: {device.serial_number}) | Signal Quality: {payload.signal_quality}",

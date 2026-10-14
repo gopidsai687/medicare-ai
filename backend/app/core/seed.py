@@ -127,6 +127,51 @@ async def seed_initial_data(session: AsyncSession) -> None:
             await session.flush()
             log.info("Seeded patient profile for Alice Johnson")
 
+        # 3b. Patient Bob Smith (for cross-patient isolation and testing)
+        res_bob = await session.execute(select(User).where(User.email == "bob.smith@medicare.ai"))
+        bob_user = res_bob.scalar_one_or_none()
+        if not bob_user:
+            bob_user = User(
+                id=uuid.uuid4(),
+                email="bob.smith@medicare.ai",
+                hashed_password=hash_password("PatientPass123!"),
+                full_name="Bob Smith",
+                role=UserRole.PATIENT,
+                is_active=True,
+                is_verified=True,
+            )
+            session.add(bob_user)
+            await session.flush()
+            log.info("Seeded patient user: bob.smith@medicare.ai")
+        else:
+            bob_user.is_active = True
+            bob_user.is_verified = True
+
+        res_bob_profile = await session.execute(select(Patient).where(Patient.user_id == bob_user.id))
+        bob_profile = res_bob_profile.scalar_one_or_none()
+        if not bob_profile:
+            bob_profile = Patient(
+                id=uuid.uuid4(),
+                user_id=bob_user.id,
+                mrn="MRN-10002",
+                date_of_birth=date(1985, 9, 23),
+                gender=Gender.MALE,
+                blood_type=BloodType.A_POS,
+                phone="(555) 345-6789",
+                address_line1="123 Oak Avenue",
+                city="Springfield",
+                state="OR",
+                zip_code="97477",
+                country="US",
+                emergency_contact_name="Alice Smith",
+                emergency_contact_phone="(555) 987-6543",
+                emergency_contact_relation="Spouse",
+                notes="Hypertension stage 1 under observation.",
+            )
+            session.add(bob_profile)
+            await session.flush()
+            log.info("Seeded patient profile for Bob Smith")
+
         # 4. Clinical Relationship Data: Appointment between Alice and Dr. Sarah Chen
         if pat_profile and doc_profile:
             res_appt = await session.execute(
