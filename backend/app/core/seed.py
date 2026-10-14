@@ -16,6 +16,7 @@ from app.models.appointment import Appointment, AppointmentStatus, AppointmentTy
 from app.models.prescription import Prescription, PrescriptionStatus
 from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
 from app.models.vital_sign import VitalSign, VitalReminder, VitalSharingConsent
+from app.models.medical_device import MedicalDevice, DeviceProtocol, DeviceStatus
 
 log = structlog.get_logger(__name__)
 
@@ -415,6 +416,43 @@ async def seed_initial_data(session: AsyncSession) -> None:
                 session.add(consent)
                 await session.flush()
                 log.info("Seeded active VitalSense sharing consent for Dr. Sarah Chen")
+
+            # 10. Medical Device: BioSens FS-100 Optical Station for Alice Johnson
+            try:
+                res_dev = await session.execute(
+                    select(MedicalDevice).where(MedicalDevice.patient_id == pat_profile.id)
+                )
+                if not res_dev.scalar_one_or_none():
+                    biosens_dev = MedicalDevice(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        device_name="MediCare BioSens FS-100 Optical Station",
+                        device_type="fingertip_optical_station",
+                        manufacturer="MediCare BioSens Lab",
+                        model_number="MC-BIO-FS100",
+                        serial_number="SN-FS100-2026-9812",
+                        hardware_revision="Rev 2.1",
+                        firmware_version="v1.4.2",
+                        protocol=DeviceProtocol.WEBSERIAL.value,
+                        status=DeviceStatus.CONNECTED.value,
+                        battery_percentage=94,
+                        supports_heart_rate=True,
+                        supports_spo2=True,
+                        supports_perfusion_index=True,
+                        supports_dermal_temperature=True,
+                        supports_contact_force=True,
+                        supports_blood_pressure=False,  # Uncalibrated until cuff initialization
+                        is_bp_calibrated=False,
+                        supports_blood_glucose=False,   # Scientifically not feasible via non-invasive optical
+                        is_demo_device=False,
+                        notes="Primary clinical study device. Multi-spectral optical photoplethysmography array with contact force gating.",
+                        last_heartbeat_at=datetime.now(timezone.utc),
+                    )
+                    session.add(biosens_dev)
+                    await session.flush()
+                    log.info("Seeded BioSens FS-100 optical station for Alice Johnson")
+            except Exception as dev_err:
+                log.warning("Skipping device seeding (table may not be created yet)", error=str(dev_err))
 
         await session.commit()
         log.info("Baseline clinical accounts verification/seeding completed successfully.")

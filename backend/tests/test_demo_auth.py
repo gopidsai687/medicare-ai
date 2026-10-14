@@ -10,13 +10,16 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
-from app.core.database import AsyncSessionFactory
+from app.core.database import AsyncSessionFactory, engine
 from app.core.seed import seed_initial_data
+from app.models.base import Base
 
 
 @pytest.mark.asyncio
 async def test_demo_accounts_authentication():
-    # 1. Ensure accounts seeded
+    # 1. Ensure tables created and accounts seeded
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
     async with AsyncSessionFactory() as session:
         await seed_initial_data(session)
 

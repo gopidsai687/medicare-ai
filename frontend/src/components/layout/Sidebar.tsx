@@ -25,6 +25,7 @@ import {
   Gauge,
   Droplet,
   User,
+  Cpu,
   LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
@@ -45,6 +46,7 @@ const PATIENT_NAV: NavItem[] = [
   { to: '/patient/hospitals', icon: MapPin, label: 'Emergency & Hospitals' },
   { to: '/patient/profile', icon: User, label: 'Health Timeline' },
   { to: '/patient/vitalsense/research', icon: Microscope, label: 'PPG Research Lab' },
+  { to: '/patient/devices', icon: Cpu, label: 'Device Station' },
   { to: '/patient/prescriptions', icon: Pill, label: 'Prescription Analyzer' },
   { to: '/patient/reports', icon: FileSearch, label: 'Medical Report Analyzer' },
   { to: '/patient/analyses', icon: Sparkles, label: 'Previous AI Analyses' },

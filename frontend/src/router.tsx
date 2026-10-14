@@ -23,6 +23,7 @@ const PatientBloodGlucose = lazy(() => import('@/pages/patient/BloodGlucoseTrack
 const PatientNearbyHospitals = lazy(() => import('@/pages/patient/NearbyHospitals'))
 const PatientHealthProfile = lazy(() => import('@/pages/patient/PatientHealthProfile'))
 const PatientPPGResearch = lazy(() => import('@/pages/patient/PPGResearch'))
+const PatientDeviceConnections = lazy(() => import('@/pages/patient/DeviceConnections'))
 const PatientSettings = lazy(() => import('@/pages/patient/Settings'))
 
 // Doctor
@@ -89,6 +90,7 @@ export const router = createBrowserRouter([
           { path: '/patient/hospitals', element: withSuspense(PatientNearbyHospitals) },
           { path: '/patient/profile', element: withSuspense(PatientHealthProfile) },
           { path: '/patient/vitalsense/research', element: withSuspense(PatientPPGResearch) },
+          { path: '/patient/devices', element: withSuspense(PatientDeviceConnections) },
           { path: '/patient/settings', element: withSuspense(PatientSettings) },
         ],
       },

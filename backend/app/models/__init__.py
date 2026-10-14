@@ -33,6 +33,14 @@ from app.models.vital_sign import (
 )
 from app.models.encounter import Encounter, EncounterType, EncounterStatus
 from app.models.audit_log import AuditLog, AuditAction, AuditSeverity
+from app.models.medical_device import (
+    MedicalDevice,
+    DeviceTelemetryPacket,
+    MeasurementProvenance,
+    DeviceProtocol,
+    DeviceStatus,
+    SignalQuality,
+)
 
 # Enterprise Standard Models (53 Healthcare Canonical Entities)
 from app.models.enterprise_patient import (
