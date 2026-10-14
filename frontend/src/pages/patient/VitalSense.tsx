@@ -32,6 +32,10 @@ import {
   Bluetooth,
   FlaskConical,
   Usb,
+  Camera,
+  FileText,
+  Layers,
+  Video,
 } from 'lucide-react'
 import {
   ResponsiveContainer,
@@ -48,6 +52,7 @@ import { api } from '@/lib/api'
 import { format } from 'date-fns'
 import { BodyMap } from '@/components/vitals/BodyMap'
 import { TestModeConsole } from '@/components/vitals/TestModeConsole'
+import { WebcamPulseModal } from '@/components/vitals/WebcamPulseModal'
 
 // -----------------------------------------------------------------------------
 // Interfaces
@@ -190,6 +195,10 @@ export default function VitalSense() {
   const [consents, setConsents] = useState<SharingConsent[]>([])
   const [doctorsList, setDoctorsList] = useState<Array<{ id: string; name: string; specialty: string }>>([])
 
+  // Mode Filter & Webcam Demo States
+  const [dataFilter, setDataFilter] = useState<'all' | 'actual' | 'demo'>('all')
+  const [showWebcamPulseModal, setShowWebcamPulseModal] = useState(false)
+
   // Biometric state
   const [biometricStatus, setBiometricStatus] = useState<{ enrolled: boolean; msg: string }>({
     enrolled: false,
@@ -201,6 +210,7 @@ export default function VitalSense() {
     systolic_bp: 120,
     diastolic_bp: 80,
     heart_rate: 70,
+    recorded_at: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     source: 'manual_entry',
     device_name: '',
     notes: '',
@@ -210,6 +220,7 @@ export default function VitalSense() {
     blood_glucose: 100,
     glucose_unit: 'mg/dL',
     glucose_context: 'fasting',
+    recorded_at: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
     source: 'manual_entry',
     device_name: '',
     notes: '',
@@ -472,15 +483,18 @@ export default function VitalSense() {
         systolic_bp: Number(bpForm.systolic_bp),
         diastolic_bp: Number(bpForm.diastolic_bp),
         heart_rate: bpForm.heart_rate ? Number(bpForm.heart_rate) : null,
+        recorded_at: bpForm.recorded_at ? new Date(bpForm.recorded_at).toISOString() : new Date().toISOString(),
         measurement_source: bpForm.source,
         device_name: bpForm.device_name || null,
         notes: bpForm.notes || null,
+        is_sample: false,
       })
       setShowBpModal(false)
       setBpForm({
         systolic_bp: 120,
         diastolic_bp: 80,
         heart_rate: 70,
+        recorded_at: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
         source: 'manual_entry',
         device_name: '',
         notes: '',
@@ -500,15 +514,18 @@ export default function VitalSense() {
         blood_glucose: Number(glucoseForm.blood_glucose),
         glucose_unit: glucoseForm.glucose_unit,
         glucose_context: glucoseForm.glucose_context,
+        recorded_at: glucoseForm.recorded_at ? new Date(glucoseForm.recorded_at).toISOString() : new Date().toISOString(),
         measurement_source: glucoseForm.source,
         device_name: glucoseForm.device_name || null,
         notes: glucoseForm.notes || null,
+        is_sample: false,
       })
       setShowGlucoseModal(false)
       setGlucoseForm({
         blood_glucose: 100,
         glucose_unit: 'mg/dL',
         glucose_context: 'fasting',
+        recorded_at: format(new Date(), "yyyy-MM-dd'T'HH:mm"),
         source: 'manual_entry',
         device_name: '',
         notes: '',
@@ -714,16 +731,39 @@ export default function VitalSense() {
   }
 
   // ---------------------------------------------------------------------------
-  // Latest Telemetry & Metrics
+  // Segmented Telemetry & Latest Metric Priority
   // ---------------------------------------------------------------------------
-  const latestBp = useMemo(() => vitals.find((v) => v.systolic_bp != null), [vitals])
-  const latestGlucose = useMemo(() => vitals.find((v) => v.blood_glucose != null), [vitals])
-  const latestHeartRate = useMemo(() => vitals.find((v) => v.heart_rate != null), [vitals])
-  const latestWeight = useMemo(() => vitals.find((v) => v.weight != null), [vitals])
+  // Separate genuine patient entries (real device or manual) from simulated test data
+  const actualVitals = useMemo(() => vitals.filter((v) => !v.is_sample), [vitals])
+  const demoVitals = useMemo(() => vitals.filter((v) => v.is_sample), [vitals])
 
-  // Chart Data preparation
+  // Filtered dataset for charts and logs according to selected mode view
+  const filteredVitals = useMemo(() => {
+    if (dataFilter === 'actual') return actualVitals
+    if (dataFilter === 'demo') return demoVitals
+    return vitals
+  }, [vitals, actualVitals, demoVitals, dataFilter])
+
+  // Latest Telemetry: Always prioritize genuine patient records over fictional simulation
+  const actualBp = useMemo(() => actualVitals.find((v) => v.systolic_bp != null), [actualVitals])
+  const demoBp = useMemo(() => demoVitals.find((v) => v.systolic_bp != null), [demoVitals])
+  const latestBp = dataFilter === 'demo' ? demoBp : (actualBp || demoBp)
+
+  const actualGlucose = useMemo(() => actualVitals.find((v) => v.blood_glucose != null), [actualVitals])
+  const demoGlucose = useMemo(() => demoVitals.find((v) => v.blood_glucose != null), [demoVitals])
+  const latestGlucose = dataFilter === 'demo' ? demoGlucose : (actualGlucose || demoGlucose)
+
+  const actualHeartRate = useMemo(() => actualVitals.find((v) => v.heart_rate != null), [actualVitals])
+  const demoHeartRate = useMemo(() => demoVitals.find((v) => v.heart_rate != null), [demoVitals])
+  const latestHeartRate = dataFilter === 'demo' ? demoHeartRate : (actualHeartRate || demoHeartRate)
+
+  const actualWeight = useMemo(() => actualVitals.find((v) => v.weight != null), [actualVitals])
+  const demoWeight = useMemo(() => demoVitals.find((v) => v.weight != null), [demoVitals])
+  const latestWeight = dataFilter === 'demo' ? demoWeight : (actualWeight || demoWeight)
+
+  // Chart Data preparation based on current filtered dataset
   const chartData = useMemo(() => {
-    return [...vitals]
+    return [...filteredVitals]
       .reverse()
       .map((v) => ({
         date: format(new Date(v.recorded_at), 'MM/dd HH:mm'),
@@ -733,8 +773,9 @@ export default function VitalSense() {
         heartRate: v.heart_rate || null,
         weight: v.weight || null,
         source: v.measurement_source,
+        isSample: v.is_sample,
       }))
-  }, [vitals])
+  }, [filteredVitals])
 
   // Helper Badge Colors
   const getBpCategoryBadge = (cat?: string | null) => {
@@ -764,9 +805,9 @@ export default function VitalSense() {
   }
 
   const getSourceBadge = (source: string, isSample: boolean, deviceName?: string | null) => {
-    if (isSample || source === 'SAMPLE_DATA' || source === 'simulated_ble') {
+    if (isSample || source === 'SAMPLE_DATA' || source === 'sample_data' || source === 'simulated_ble') {
       return (
-        <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/40 inline-flex items-center gap-1">
+        <span className="px-2 py-0.5 rounded text-[11px] font-bold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40 inline-flex items-center gap-1">
           <FlaskConical size={11} /> DEMO DATA
         </span>
       )
@@ -785,9 +826,16 @@ export default function VitalSense() {
         </span>
       )
     }
+    if (source === 'webcam_rppg_experimental') {
+      return (
+        <span className="px-2 py-0.5 rounded text-[11px] font-medium font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/40 inline-flex items-center gap-1">
+          <Camera size={11} /> WEBCAM EXPERIMENTAL
+        </span>
+      )
+    }
     return (
-      <span className="px-2 py-0.5 rounded text-[11px] font-medium font-mono bg-slate-500/20 text-slate-300 border border-slate-500/30 inline-flex items-center gap-1">
-        MANUAL ENTRY
+      <span className="px-2 py-0.5 rounded text-[11px] font-medium font-mono bg-slate-500/20 text-slate-300 border border-slate-500/40 inline-flex items-center gap-1">
+        <FileText size={11} /> Manual Entry — Not Device Verified
       </span>
     )
   }
@@ -859,6 +907,169 @@ export default function VitalSense() {
           >
             <Fingerprint size={14} /> Passkey Auth
           </button>
+          <button
+            onClick={() => setShowWebcamPulseModal(true)}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-medium bg-indigo-900/40 hover:bg-indigo-800/50 text-indigo-300 border border-indigo-500/30 transition-all cursor-pointer"
+          >
+            <Camera size={14} /> Webcam Pulse Demo
+          </button>
+        </div>
+      </div>
+
+      {/* ── Three Clearly Separated Measurement Modes & Hardware Status Hub ── */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Mode A: Real Device Data */}
+        <div className="glass p-5 rounded-2xl border border-slate-800 bg-surface-900/90 flex flex-col justify-between space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold tracking-wider uppercase text-emerald-400 flex items-center gap-1.5">
+                <ShieldCheck size={14} /> Mode A — Real Device Data
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300 border border-slate-700">
+                Hardware Required
+              </span>
+            </div>
+            <h4 className="text-sm font-bold text-white mb-1">
+              Bluetooth &amp; Cloud Peripherals
+            </h4>
+            <p className="text-xs text-slate-400 leading-relaxed mb-3">
+              Receives verified streams from compatible medical equipment: ISO 81060-2 upper-arm cuffs (GATT 0x1810), electrochemical strip meters (GATT 0x1808), or CGMs (Dexcom/Libre).
+            </p>
+            <div className="p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-xs space-y-1">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">Connection Status:</span>
+                <span className="font-bold text-rose-400">No compatible device connected</span>
+              </div>
+              <p className="text-[10px] text-slate-500">
+                Zero fake connections • Hardware must be powered on &amp; in pairing mode to stream.
+              </p>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-slate-800">
+            <button
+              onClick={() => setShowDeviceModal(true)}
+              className="w-full py-2 px-3 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-200 border border-indigo-500/30 text-xs font-semibold cursor-pointer transition-all flex items-center justify-center gap-1.5"
+            >
+              <Cpu size={14} /> Open Medical Device Hub
+            </button>
+          </div>
+        </div>
+
+        {/* Mode B: Manual Entry */}
+        <div className="glass p-5 rounded-2xl border border-blue-500/30 bg-blue-950/20 flex flex-col justify-between space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold tracking-wider uppercase text-blue-400 flex items-center gap-1.5">
+                <FileText size={14} /> Mode B — Manual Entry
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-500/20 text-blue-300 border border-blue-500/40">
+                Active &amp; Ready
+              </span>
+            </div>
+            <h4 className="text-sm font-bold text-white mb-1">
+              Patient-Entered Health Readings
+            </h4>
+            <p className="text-xs text-slate-300 leading-relaxed mb-3">
+              No medical hardware required. Enter readings obtained from your existing home cuff, clinic doctor visit, or lab report. All records persist to your authenticated patient account.
+            </p>
+            <div className="p-3 rounded-xl bg-blue-900/30 border border-blue-600/30 text-xs text-blue-200 space-y-1">
+              <div className="font-semibold text-white flex items-center gap-1">
+                <CheckCircle2 size={13} className="text-blue-400" /> Audited Provenance Attribution:
+              </div>
+              <p className="text-[11px] text-blue-200/90">
+                Every entry is labeled: <strong className="text-white font-mono">Manual Entry — Not Device Verified</strong>
+              </p>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-blue-500/20 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setShowBpModal(true)}
+              className="py-2 px-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold cursor-pointer shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-1"
+            >
+              <Heart size={13} /> + Manual BP
+            </button>
+            <button
+              onClick={() => setShowGlucoseModal(true)}
+              className="py-2 px-2.5 rounded-xl bg-teal-600 hover:bg-teal-500 text-white text-xs font-semibold cursor-pointer shadow-lg shadow-teal-600/30 transition-all flex items-center justify-center gap-1"
+            >
+              <Droplets size={13} /> + Manual Glucose
+            </button>
+          </div>
+        </div>
+
+        {/* Mode C: Demo and Simulation */}
+        <div className="glass p-5 rounded-2xl border border-purple-500/30 bg-purple-950/20 flex flex-col justify-between space-y-3">
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold tracking-wider uppercase text-purple-400 flex items-center gap-1.5">
+                <FlaskConical size={14} /> Mode C — Demo &amp; Sim Console
+              </span>
+              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">
+                Software Testing
+              </span>
+            </div>
+            <h4 className="text-sm font-bold text-white mb-1">
+              Deterministic Clinical Testbench
+            </h4>
+            <p className="text-xs text-slate-300 leading-relaxed mb-3">
+              Safely test clinical alert triggers, threshold boundaries, and chart responses with fictional telemetry. Never confused with real patient measurements.
+            </p>
+            <div className="p-3 rounded-xl bg-purple-900/30 border border-purple-600/30 text-xs text-purple-200 space-y-1">
+              <div>Telemetry Badged: <strong className="text-amber-300 font-mono">DEMO DATA</strong></div>
+              <p className="text-[11px] text-purple-300/90">
+                Resetting demo data never touches your real patient records.
+              </p>
+            </div>
+          </div>
+          <div className="pt-2 border-t border-purple-500/20 flex items-center justify-between">
+            <span className="text-xs text-purple-300 font-medium">Test controls below ↓</span>
+            <button
+              onClick={() => setShowWebcamPulseModal(true)}
+              className="py-2 px-3 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-xs font-medium cursor-pointer transition-all flex items-center gap-1"
+            >
+              <Camera size={13} /> Webcam Pulse Demo
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Mode Data Filter Bar ── */}
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 rounded-2xl bg-slate-900/80 border border-slate-800">
+        <div className="flex items-center gap-2.5">
+          <span className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+            <Filter size={14} className="text-blue-400" /> Filter Displayed Records:
+          </span>
+          <div className="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs">
+            <button
+              onClick={() => setDataFilter('all')}
+              className={`px-3 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                dataFilter === 'all' ? 'bg-blue-600 text-white shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              All Telemetry ({vitals.length})
+            </button>
+            <button
+              onClick={() => setDataFilter('actual')}
+              className={`px-3 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                dataFilter === 'actual' ? 'bg-emerald-600 text-white shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Patient Health Records ({actualVitals.length})
+            </button>
+            <button
+              onClick={() => setDataFilter('demo')}
+              className={`px-3 py-1 rounded-lg font-medium transition-all cursor-pointer ${
+                dataFilter === 'demo' ? 'bg-amber-600 text-white shadow' : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Demo &amp; Simulated ({demoVitals.length})
+            </button>
+          </div>
+        </div>
+        <div className="text-[11px] text-slate-400 font-mono">
+          {dataFilter === 'actual' && '✓ Viewing real patient records (manual entries & validated devices only)'}
+          {dataFilter === 'demo' && '⚠️ Viewing fictional clinical demo telemetry only'}
+          {dataFilter === 'all' && '✓ Viewing complete telemetry log with explicit source badges'}
         </div>
       </div>
 
@@ -976,22 +1187,41 @@ export default function VitalSense() {
                     </span>
                   )}
                 </div>
+                {latestBp.is_sample && !actualBp && (
+                  <div className="mt-2 text-[10px] text-amber-300 font-medium bg-amber-500/10 p-1.5 rounded border border-amber-500/20">
+                    ⚠️ Demo Simulation Active • Log a manual reading to record real patient data.
+                  </div>
+                )}
                 <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
                   <span className="truncate max-w-[150px]">{latestBp.device_name || (latestBp.heart_rate ? `Pulse: ${latestBp.heart_rate} bpm` : 'Pneumatic Cuff')}</span>
                   <span>{format(new Date(latestBp.recorded_at), 'MMM d, h:mm a')}</span>
                 </div>
               </div>
             ) : (
-              <div className="py-4 text-center text-slate-500 text-xs">No blood pressure recorded yet.</div>
+              <div className="py-6 px-2 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-blue-500/10 text-blue-400 mx-auto flex items-center justify-center">
+                  <Heart size={20} />
+                </div>
+                <p className="text-xs font-semibold text-slate-300">No Blood Pressure Recorded</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Enter a reading from your home cuff or doctor's visit, or pair a compatible Bluetooth monitor.
+                </p>
+                <button
+                  onClick={() => setShowBpModal(true)}
+                  className="mt-1 px-3 py-1.5 rounded-lg bg-blue-600/30 hover:bg-blue-600/50 border border-blue-500/30 text-blue-300 text-xs font-medium cursor-pointer"
+                >
+                  + Log Manual BP Reading
+                </button>
+              </div>
             )}
           </div>
           <div className="mt-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
-            <span>Method: Upper-arm cuff</span>
+            <span>Method: {latestBp?.is_sample ? 'Simulated Demo' : latestBp?.measurement_source?.startsWith('manual') ? 'Manual Cuff Log' : 'Pneumatic Cuff'}</span>
             <button
-              onClick={() => setShowDeviceModal(true)}
-              className="text-indigo-400 hover:text-indigo-300 font-medium cursor-pointer"
+              onClick={() => setShowBpModal(true)}
+              className="text-blue-400 hover:text-blue-300 font-medium cursor-pointer"
             >
-              Pair Monitor →
+              + Log Manual →
             </button>
           </div>
         </div>
@@ -1029,89 +1259,168 @@ export default function VitalSense() {
                     {latestGlucose.glucose_context?.replace('_', ' ') || 'Fasting'}
                   </span>
                 </div>
+                {latestGlucose.is_sample && !actualGlucose && (
+                  <div className="mt-2 text-[10px] text-amber-300 font-medium bg-amber-500/10 p-1.5 rounded border border-amber-500/20">
+                    ⚠️ Demo Simulation Active • Log a manual reading to record real patient data.
+                  </div>
+                )}
                 <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
                   <span className="truncate max-w-[150px]">{latestGlucose.device_name || 'Enzymatic Sensor (SMBG/CGM)'}</span>
                   <span>{format(new Date(latestGlucose.recorded_at), 'MMM d, h:mm a')}</span>
                 </div>
               </div>
             ) : (
-              <div className="py-4 text-center text-slate-500 text-xs">No glucose records logged.</div>
+              <div className="py-6 px-2 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-teal-500/10 text-teal-400 mx-auto flex items-center justify-center">
+                  <Droplets size={20} />
+                </div>
+                <p className="text-xs font-semibold text-slate-300">No Blood Glucose Recorded</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Enter a reading from your home test strip meter or lab report, or connect an authorized CGM.
+                </p>
+                <button
+                  onClick={() => setShowGlucoseModal(true)}
+                  className="mt-1 px-3 py-1.5 rounded-lg bg-teal-600/30 hover:bg-teal-600/50 border border-teal-500/30 text-teal-300 text-xs font-medium cursor-pointer"
+                >
+                  + Log Manual Glucose
+                </button>
+              </div>
             )}
           </div>
           <div className="mt-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
-            <span>Method: Strip / CGM wire</span>
+            <span>Method: {latestGlucose?.is_sample ? 'Simulated Demo' : latestGlucose?.measurement_source?.startsWith('manual') ? 'Manual Strip Log' : 'Enzymatic Strip / CGM'}</span>
             <button
-              onClick={() => setShowDeviceModal(true)}
+              onClick={() => setShowGlucoseModal(true)}
               className="text-teal-400 hover:text-teal-300 font-medium cursor-pointer"
             >
-              Pair Meter →
+              + Log Manual →
             </button>
           </div>
         </div>
 
         {/* Resting Heart Rate */}
-        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-rose-500/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Resting Heart Rate</span>
-            <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
-              <Activity size={16} />
+        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-rose-500/40 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Resting Heart Rate</span>
+              <div className="w-8 h-8 rounded-lg bg-rose-500/20 text-rose-400 flex items-center justify-center">
+                <Activity size={16} />
+              </div>
             </div>
+            {latestHeartRate ? (
+              <div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-3xl font-extrabold text-white">{latestHeartRate.heart_rate}</span>
+                  <span className="text-xs text-slate-400 font-medium">bpm</span>
+                </div>
+                <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                    {latestHeartRate.heart_rate! >= 60 && latestHeartRate.heart_rate! <= 100
+                      ? 'Normal Sinus Rhythm'
+                      : latestHeartRate.heart_rate! < 60
+                        ? 'Sinus Bradycardia'
+                        : 'Tachycardia Range'}
+                  </span>
+                  {getSourceBadge(latestHeartRate.measurement_source, latestHeartRate.is_sample, latestHeartRate.device_name)}
+                </div>
+                <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
+                  <span className="truncate max-w-[150px]">{latestHeartRate.device_name || 'Pulse Sensor'}</span>
+                  <span>{format(new Date(latestHeartRate.recorded_at), 'MMM d, h:mm a')}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-6 px-2 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-rose-500/10 text-rose-400 mx-auto flex items-center justify-center">
+                  <Activity size={20} />
+                </div>
+                <p className="text-xs font-semibold text-slate-300">No Heart Rate Recorded</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Log your resting pulse or test our non-diagnostic webcam rPPG demonstration.
+                </p>
+                <div className="flex items-center justify-center gap-2 mt-1">
+                  <button
+                    onClick={() => setShowQuickModal(true)}
+                    className="px-2.5 py-1.5 rounded-lg bg-rose-600/30 hover:bg-rose-600/50 border border-rose-500/30 text-rose-300 text-xs font-medium cursor-pointer"
+                  >
+                    + Log Pulse
+                  </button>
+                  <button
+                    onClick={() => setShowWebcamPulseModal(true)}
+                    className="px-2.5 py-1.5 rounded-lg bg-indigo-600/30 hover:bg-indigo-600/50 border border-indigo-500/30 text-indigo-300 text-xs font-medium cursor-pointer"
+                  >
+                    📷 Webcam Demo
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
-          {latestHeartRate ? (
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-3xl font-extrabold text-white">{latestHeartRate.heart_rate}</span>
-                <span className="text-xs text-slate-400 font-medium">bpm</span>
-              </div>
-              <div className="mt-2.5">
-                <span className="px-2 py-0.5 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                  {latestHeartRate.heart_rate! >= 60 && latestHeartRate.heart_rate! <= 100
-                    ? 'Normal Sinus Rhythm'
-                    : latestHeartRate.heart_rate! < 60
-                      ? 'Sinus Bradycardia'
-                      : 'Tachycardia Range'}
-                </span>
-              </div>
-              <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <span>Source: {latestHeartRate.measurement_source}</span>
-                <span>{format(new Date(latestHeartRate.recorded_at), 'MMM d, h:mm a')}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="py-4 text-center text-slate-500 text-xs">No heart rate logged.</div>
-          )}
+          <div className="mt-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
+            <span>Source: {latestHeartRate?.measurement_source || 'Not Logged'}</span>
+            <button
+              onClick={() => setShowQuickModal(true)}
+              className="text-rose-400 hover:text-rose-300 font-medium cursor-pointer"
+            >
+              + Log Pulse →
+            </button>
+          </div>
         </div>
 
         {/* Body Weight */}
-        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-amber-500/40 transition-all">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Body Weight</span>
-            <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
-              <Scale size={16} />
+        <div className="glass p-5 rounded-2xl relative overflow-hidden group hover:border-amber-500/40 transition-all flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-slate-400 uppercase tracking-wider">Body Weight</span>
+              <div className="w-8 h-8 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                <Scale size={16} />
+              </div>
             </div>
+            {latestWeight ? (
+              <div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-3xl font-extrabold text-white">{latestWeight.weight}</span>
+                  <span className="text-xs text-slate-400 font-medium">kg</span>
+                  <span className="text-xs text-slate-400 ml-1">
+                    ({(latestWeight.weight! * 2.20462).toFixed(1)} lbs)
+                  </span>
+                </div>
+                <div className="mt-2.5 flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700">
+                    Stable Telemetry
+                  </span>
+                  {getSourceBadge(latestWeight.measurement_source, latestWeight.is_sample, latestWeight.device_name)}
+                </div>
+                <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
+                  <span>Calibrated scale</span>
+                  <span>{format(new Date(latestWeight.recorded_at), 'MMM d, h:mm a')}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="py-6 px-2 text-center space-y-2">
+                <div className="w-10 h-10 rounded-full bg-amber-500/10 text-amber-400 mx-auto flex items-center justify-center">
+                  <Scale size={20} />
+                </div>
+                <p className="text-xs font-semibold text-slate-300">No Weight Recorded</p>
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Track body mass over time to assess hemodynamic fluid retention and metabolic trends.
+                </p>
+                <button
+                  onClick={() => setShowQuickModal(true)}
+                  className="mt-1 px-3 py-1.5 rounded-lg bg-amber-600/30 hover:bg-amber-600/50 border border-amber-500/30 text-amber-300 text-xs font-medium cursor-pointer"
+                >
+                  + Log Body Weight
+                </button>
+              </div>
+            )}
           </div>
-          {latestWeight ? (
-            <div>
-              <div className="flex items-baseline gap-1.5">
-                <span className="text-3xl font-extrabold text-white">{latestWeight.weight}</span>
-                <span className="text-xs text-slate-400 font-medium">kg</span>
-                <span className="text-xs text-slate-400 ml-1">
-                  ({(latestWeight.weight! * 2.20462).toFixed(1)} lbs)
-                </span>
-              </div>
-              <div className="mt-2.5 flex items-center gap-1.5">
-                <span className="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-300 border border-slate-700">
-                  Stable Telemetry
-                </span>
-              </div>
-              <div className="mt-3 text-[11px] text-slate-400 flex items-center justify-between pt-2 border-t border-slate-800/80">
-                <span>Calibrated scale</span>
-                <span>{format(new Date(latestWeight.recorded_at), 'MMM d, h:mm a')}</span>
-              </div>
-            </div>
-          ) : (
-            <div className="py-4 text-center text-slate-500 text-xs">No weight entries.</div>
-          )}
+          <div className="mt-2 pt-2 border-t border-slate-800/60 text-[10px] text-slate-400 flex items-center justify-between">
+            <span>Source: {latestWeight?.measurement_source || 'Not Logged'}</span>
+            <button
+              onClick={() => setShowQuickModal(true)}
+              className="text-amber-400 hover:text-amber-300 font-medium cursor-pointer"
+            >
+              + Log Weight →
+            </button>
+          </div>
         </div>
       </div>
 
@@ -1432,7 +1741,7 @@ export default function VitalSense() {
             <h3 className="font-bold text-sm text-white">Recent Vital Telemetry Log</h3>
             <span className="text-xs text-slate-400">Verifiable device attribution &amp; clinical notes</span>
           </div>
-          <span className="text-xs font-mono text-slate-400">{vitals.length} records</span>
+          <span className="text-xs font-mono text-slate-400">{filteredVitals.length} records</span>
         </div>
 
         <div className="overflow-x-auto">
@@ -1448,8 +1757,8 @@ export default function VitalSense() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {vitals.length > 0 ? (
-                vitals.map((v) => (
+              {filteredVitals.length > 0 ? (
+                filteredVitals.map((v) => (
                   <tr key={v.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="p-3.5 text-slate-300 font-mono">
                       {format(new Date(v.recorded_at), 'yyyy-MM-dd HH:mm')}
@@ -1530,7 +1839,7 @@ export default function VitalSense() {
               ) : (
                 <tr>
                   <td colSpan={6} className="p-8 text-center text-slate-500">
-                    No measurements found for the selected time range. Use the action buttons above to record readings.
+                    No measurements found for the selected filter and time range. Use the action buttons above to record readings.
                   </td>
                 </tr>
               )}
@@ -1589,6 +1898,7 @@ export default function VitalSense() {
                   type="number"
                   min="30"
                   max="240"
+                  placeholder="e.g., 72"
                   value={bpForm.heart_rate || ''}
                   onChange={(e) => setBpForm({ ...bpForm, heart_rate: Number(e.target.value) })}
                   className="w-full bg-slate-900 p-2 rounded-xl border border-slate-700 text-white"
@@ -1596,17 +1906,32 @@ export default function VitalSense() {
               </div>
 
               <div>
-                <label className="text-slate-300 font-medium block mb-1">Measurement Source / Device</label>
+                <label className="text-slate-300 font-medium block mb-1 flex items-center gap-1">
+                  <Clock size={13} className="text-blue-400" /> Measurement Date &amp; Time
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={bpForm.recorded_at}
+                  onChange={(e) => setBpForm({ ...bpForm, recorded_at: e.target.value })}
+                  className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="text-slate-300 font-medium block mb-1">Measurement Source / Origin</label>
                 <select
                   value={bpForm.source}
                   onChange={(e) => setBpForm({ ...bpForm, source: e.target.value })}
                   className="w-full bg-slate-900 p-2 rounded-xl border border-slate-700 text-white"
                 >
-                  <option value="manual_entry">Manual Home Entry (Upper Arm Cuff)</option>
-                  <option value="omron_connect">Omron Connect Upper Arm Monitor</option>
+                  <option value="manual_home_cuff">Home Upper-Arm Cuff Monitor (Oscillometric)</option>
+                  <option value="manual_clinic">Doctor's Office / Clinic Measurement</option>
+                  <option value="manual_sphygmomanometer">Aneroid Sphygmomanometer (Manual Stethoscope)</option>
+                  <option value="manual_wrist">Wrist Blood Pressure Monitor</option>
+                  <option value="omron_connect">Omron Connect App Export</option>
                   <option value="apple_health">Apple Health Sync</option>
                   <option value="google_health_connect">Google Health Connect</option>
-                  <option value="sample_data">Sample Clinical Demo</option>
                 </select>
               </div>
 
@@ -1621,8 +1946,13 @@ export default function VitalSense() {
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300">
-                Notice: Actual readings must come from user-entered measurements or validated physical cuffs. MediCare does not physically measure blood pressure from web browsers or optical cameras.
+              <div className="p-3 rounded-xl bg-blue-500/10 border border-blue-500/20 text-[11px] text-blue-300 space-y-1">
+                <div className="font-semibold flex items-center gap-1">
+                  <FileText size={13} /> Labeling Guarantee:
+                </div>
+                <div>
+                  This reading will be permanently recorded and labeled as <strong>"Manual Entry — Not Device Verified"</strong>. It will never be presented as a direct hardware sensor measurement.
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -1703,15 +2033,30 @@ export default function VitalSense() {
               </div>
 
               <div>
+                <label className="text-slate-300 font-medium block mb-1 flex items-center gap-1">
+                  <Clock size={13} className="text-teal-400" /> Measurement Date &amp; Time
+                </label>
+                <input
+                  type="datetime-local"
+                  required
+                  value={glucoseForm.recorded_at}
+                  onChange={(e) => setGlucoseForm({ ...glucoseForm, recorded_at: e.target.value })}
+                  className="w-full bg-slate-900 p-2.5 rounded-xl border border-slate-700 text-white font-mono"
+                />
+              </div>
+
+              <div>
                 <label className="text-slate-300 font-medium block mb-1">Measurement Source / Meter</label>
                 <select
                   value={glucoseForm.source}
                   onChange={(e) => setGlucoseForm({ ...glucoseForm, source: e.target.value })}
                   className="w-full bg-slate-900 p-2 rounded-xl border border-slate-700 text-white"
                 >
-                  <option value="manual_entry">Fingerstick Glucometer (Manual)</option>
-                  <option value="dexcom_cgm">Dexcom G7 Continuous Glucose Monitor</option>
-                  <option value="freestyle_libre">Abbott FreeStyle Libre</option>
+                  <option value="manual_fingerstick">Home Electrochemical Fingerstick Meter (Test Strip)</option>
+                  <option value="manual_clinic">Clinic Point-of-Care Glucose Meter</option>
+                  <option value="manual_lab">Laboratory Venous Blood Draw</option>
+                  <option value="dexcom_cgm">Dexcom CGM Data Export</option>
+                  <option value="freestyle_libre">Abbott FreeStyle Libre Export</option>
                   <option value="apple_health">Apple Health Sync</option>
                 </select>
               </div>
@@ -1727,8 +2072,13 @@ export default function VitalSense() {
                 />
               </div>
 
-              <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/20 text-[11px] text-teal-300">
-                Notice: MediCare does not calculate insulin doses, diagnose diabetes, or guess glucose from fingerprint scanners or cameras. Values must be obtained from an electrochemical meter or CGM.
+              <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/20 text-[11px] text-teal-300 space-y-1">
+                <div className="font-semibold flex items-center gap-1">
+                  <FileText size={13} /> Labeling Guarantee:
+                </div>
+                <div>
+                  This reading will be recorded and labeled as <strong>"Manual Entry — Not Device Verified"</strong>. It will never be represented as an optical or camera sensor reading.
+                </div>
               </div>
 
               <div className="flex justify-end gap-2 pt-2">
@@ -2556,6 +2906,17 @@ export default function VitalSense() {
           </div>
         </div>
       )}
+
+      {/* ── Optional Experimental Webcam Pulse Modal ──────────────────────── */}
+      <WebcamPulseModal
+        isOpen={showWebcamPulseModal}
+        onClose={() => setShowWebcamPulseModal(false)}
+        onSaved={() => {
+          fetchVitals()
+          fetchAlerts()
+          setRefreshKey((k) => k + 1)
+        }}
+      />
     </div>
   )
 }

@@ -235,6 +235,17 @@ export function TestModeConsole({ onSimulated, compact = false }: TestModeConsol
             </button>
           </div>
 
+          {/* Clinical Safety Guarantee Notice */}
+          <div className="p-2.5 rounded-xl bg-purple-950/40 border border-purple-500/20 text-[11px] text-purple-200 flex items-center justify-between">
+            <span className="flex items-center gap-1.5">
+              <ShieldCheck size={13} className="text-purple-400 shrink-0" />
+              <strong>Safety Guarantee:</strong> "Reset Test Data" exclusively deletes simulated test records (<code>is_sample=True</code>). Real device measurements and manual patient entries are permanently preserved.
+            </span>
+            <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+              Mode C Isolation Active
+            </span>
+          </div>
+
           {/* Feedback Toast */}
           {feedback && (
             <div

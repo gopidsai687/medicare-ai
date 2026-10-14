@@ -15,6 +15,12 @@ from app.models.base import Base, TimestampMixin, UUIDMixin
 
 class MeasurementSource(str, enum.Enum):
     MANUAL_ENTRY = "manual_entry"
+    MANUAL_CLINIC = "manual_clinic"
+    MANUAL_SPHYGMOMANOMETER = "manual_sphygmomanometer"
+    MANUAL_WRIST = "manual_wrist"
+    MANUAL_LAB = "manual_lab"
+    WEBCAM_RPPG_EXPERIMENTAL = "webcam_rppg_experimental"
+    MEASURED_DEVICE = "measured_device"
     APPLE_HEALTH = "apple_health"
     GOOGLE_HEALTH_CONNECT = "google_health_connect"
     OMRON_CONNECT = "omron_connect"

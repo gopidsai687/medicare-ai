@@ -174,6 +174,7 @@ class HeartRateLogRequest(BaseModel):
     measurement_source: str = Field("manual_entry")
     device_name: Optional[str] = None
     notes: Optional[str] = None
+    is_sample: bool = Field(False, description="Whether this reading is fictional sample/test data")
 
 
 class WeightLogRequest(BaseModel):
@@ -182,6 +183,7 @@ class WeightLogRequest(BaseModel):
     measurement_source: str = Field("manual_entry")
     device_name: Optional[str] = None
     notes: Optional[str] = None
+    is_sample: bool = Field(False, description="Whether this reading is fictional sample/test data")
 
 
 # ---------------------------------------------------------

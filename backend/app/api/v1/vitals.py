@@ -558,16 +558,18 @@ async def log_weight(
     """Log body weight in kilograms."""
     patient_id = await _resolve_patient_id(db, current_user)
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
+    source = "SAMPLE_DATA" if payload.is_sample else payload.measurement_source
 
     vitals = VitalSign(
         patient_id=patient_id,
         recorded_by_id=current_user.id,
         recorded_at=recorded_at,
         weight=round(payload.weight, 1),
-        measurement_source=payload.measurement_source,
+        measurement_source=source,
         device_name=payload.device_name,
         notes=payload.notes,
         is_patient_entered=True,
+        is_sample=payload.is_sample,
     )
     db.add(vitals)
     await db.commit()
@@ -584,16 +586,18 @@ async def log_heart_rate(
     """Log resting pulse / heart rate in bpm."""
     patient_id = await _resolve_patient_id(db, current_user)
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
+    source = "SAMPLE_DATA" if payload.is_sample else payload.measurement_source
 
     vitals = VitalSign(
         patient_id=patient_id,
         recorded_by_id=current_user.id,
         recorded_at=recorded_at,
         heart_rate=payload.heart_rate,
-        measurement_source=payload.measurement_source,
+        measurement_source=source,
         device_name=payload.device_name,
         notes=payload.notes,
         is_patient_entered=True,
+        is_sample=payload.is_sample,
     )
     db.add(vitals)
     await evaluate_vital_reading(db, patient_id, vitals)

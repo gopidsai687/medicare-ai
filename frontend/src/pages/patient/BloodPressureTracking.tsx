@@ -640,14 +640,26 @@ export default function BloodPressureTracking() {
                       {r.heart_rate ? `${r.heart_rate} bpm` : '--'}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'capitalize' }}>
-                          {r.device_name || r.measurement_source}
-                        </span>
-                        {r.is_sample && (
-                          <span style={{ fontSize: '0.65rem', background: 'rgba(245,158,11,0.15)', color: '#fbbf24', padding: '1px 5px', borderRadius: 4 }}>
-                            Sample
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        {r.is_sample ? (
+                          <span style={{ fontSize: '0.68rem', fontWeight: 700, fontFamily: 'monospace', background: 'rgba(245,158,11,0.15)', color: '#fbbf24', border: '1px solid rgba(245,158,11,0.3)', padding: '2px 6px', borderRadius: 4, width: 'fit-content' }}>
+                            DEMO DATA
                           </span>
+                        ) : r.measurement_source === 'measured_device' || r.measurement_source?.includes('ble') ? (
+                          <span style={{ fontSize: '0.68rem', fontWeight: 700, fontFamily: 'monospace', background: 'rgba(16,185,129,0.15)', color: '#34d399', border: '1px solid rgba(16,185,129,0.3)', padding: '2px 6px', borderRadius: 4, width: 'fit-content' }}>
+                            REAL DEVICE DATA
+                          </span>
+                        ) : r.measurement_source === 'apple_health' || r.measurement_source === 'health_connect' || r.measurement_source === 'import' ? (
+                          <span style={{ fontSize: '0.68rem', fontWeight: 700, fontFamily: 'monospace', background: 'rgba(6,182,212,0.15)', color: '#22d3ee', border: '1px solid rgba(6,182,212,0.3)', padding: '2px 6px', borderRadius: 4, width: 'fit-content' }}>
+                            IMPORTED DATA
+                          </span>
+                        ) : (
+                          <span style={{ fontSize: '0.68rem', fontWeight: 600, fontFamily: 'monospace', background: 'rgba(100,116,139,0.15)', color: '#cbd5e1', border: '1px solid rgba(100,116,139,0.3)', padding: '2px 6px', borderRadius: 4, width: 'fit-content' }}>
+                            Manual Entry — Not Device Verified
+                          </span>
+                        )}
+                        {r.device_name && (
+                          <span style={{ fontSize: '0.7rem', color: '#94a3b8' }}>{r.device_name}</span>
                         )}
                       </div>
                     </td>
@@ -675,8 +687,14 @@ export default function BloodPressureTracking() {
               })}
               {filteredReadings.length === 0 && (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: 'center', padding: '30px', color: '#64748b' }}>
-                    No readings found. Click "Record BP Reading" above to log your first measurement.
+                  <td colSpan={7} style={{ textAlign: 'center', padding: '36px 16px', color: '#94a3b8' }}>
+                    <div style={{ maxWidth: 420, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'center' }}>
+                      <Heart size={28} color="#38bdf8" style={{ opacity: 0.6 }} />
+                      <strong style={{ color: '#f8fafc', fontSize: '0.9rem' }}>No Blood Pressure Readings Recorded Yet</strong>
+                      <span style={{ fontSize: '0.78rem', color: '#64748b', lineHeight: 1.4 }}>
+                        You do not need external Bluetooth equipment to track your health. Click "Record BP Reading" above to log a manual measurement from your home cuff or clinic visit.
+                      </span>
+                    </div>
                   </td>
                 </tr>
               )}

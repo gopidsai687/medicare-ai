@@ -198,7 +198,7 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
       >
         <Info size={15} color="#38bdf8" style={{ flexShrink: 0 }} />
         <span style={{ fontSize: '0.75rem', color: '#cbd5e1', lineHeight: 1.4 }}>
-          <strong>Educational Telemetry Map:</strong> This anatomical graphic visualizes verified patient readings (Omron, Dexcom, Apple Health, or manual logs). It is <em>not</em> an optical body scan, camera sensor, or diagnostic imaging device.
+          <strong>Educational Telemetry Map:</strong> This anatomical graphic visualizes recorded patient measurements (Manual entries, Omron, Dexcom, or test data). It is an educational visual map of recorded numbers, <em>never</em> a real-time body scan, camera sensor, or diagnostic imaging device.
         </span>
       </div>
 
@@ -571,7 +571,18 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
                 >
                   <ShieldCheck size={13} color="#38bdf8" />
                   <span>
-                    Source: <strong style={{ color: '#cbd5e1' }}>{activeIndicator.measurement_source || 'Not Recorded'}</strong>
+                    Source:{' '}
+                    <strong style={{ color: activeIndicator.is_sample ? '#f59e0b' : '#cbd5e1' }}>
+                      {activeIndicator.is_sample
+                        ? 'DEMO DATA'
+                        : activeIndicator.measurement_source === 'measured_device' || activeIndicator.measurement_source?.includes('ble')
+                        ? 'REAL DEVICE DATA'
+                        : activeIndicator.measurement_source === 'webcam_rppg_experimental'
+                        ? 'WEBCAM EXPERIMENTAL'
+                        : activeIndicator.measurement_source?.startsWith('manual')
+                        ? 'Manual Entry — Not Device Verified'
+                        : activeIndicator.measurement_source || 'Not Recorded'}
+                    </strong>
                   </span>
                 </div>
 
@@ -580,14 +591,14 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
                     style={{
                       padding: '3px 8px',
                       borderRadius: 6,
-                      background: 'rgba(245,158,11,0.1)',
-                      border: '1px solid rgba(245,158,11,0.25)',
+                      background: 'rgba(245,158,11,0.15)',
+                      border: '1px solid rgba(245,158,11,0.3)',
                       color: '#fbbf24',
                       fontSize: '0.7rem',
-                      fontWeight: 600,
+                      fontWeight: 700,
                     }}
                   >
-                    Sample Synthetic Data
+                    DEMO DATA
                   </span>
                 )}
 
