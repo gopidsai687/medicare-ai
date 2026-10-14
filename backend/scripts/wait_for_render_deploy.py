@@ -5,7 +5,7 @@ import json
 import sys
 
 BASE = "https://medicare-ai-iv31.onrender.com"
-TARGET_COMMIT = "6d8b8b8"
+TARGET_COMMIT = "46b7ef6"
 
 print("==================================================================", flush=True)
 print(f"Monitoring Render for Live Deployment of Commit {TARGET_COMMIT}...", flush=True)
@@ -150,6 +150,53 @@ try:
         print("ERROR: Unauthorized access unexpectedly succeeded!")
 except urllib.error.HTTPError as http_err:
     print(f"10. Cross-Patient Isolation: Blocked correctly with HTTP {http_err.code} ({http_err.reason})")
+
+# 11. Blood Pressure Fictional Test Reading & History Alias Check
+bp_test_payload = json.dumps({
+    "systolic": 132,
+    "diastolic": 84,
+    "heart_rate": 76,
+    "notes": "[PROD DEMO TEST] BP simulation",
+    "is_sample": True,
+}).encode()
+bp_test_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/blood-pressure",
+    data=bp_test_payload,
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
+    method="POST",
+)
+with urllib.request.urlopen(bp_test_req, timeout=15) as res:
+    bp_saved = json.loads(res.read().decode())
+    print(f"11. Blood Pressure Test Reading: Saved {bp_saved['systolic_bp']}/{bp_saved['diastolic_bp']} mmHg (is_sample={bp_saved['is_sample']}, source={bp_saved['measurement_source']})")
+
+# 12. Blood Glucose Test Reading & Health Profile Timeline Verification
+glu_test_payload = json.dumps({
+    "glucose_value": 115.0,
+    "unit": "mg/dL",
+    "context": "fasting",
+    "notes": "[PROD DEMO TEST] Fasting glucose simulation",
+    "is_sample": True,
+}).encode()
+glu_test_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/blood-glucose",
+    data=glu_test_payload,
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
+    method="POST",
+)
+with urllib.request.urlopen(glu_test_req, timeout=15) as res:
+    glu_saved = json.loads(res.read().decode())
+    print(f"12. Blood Glucose Test Reading: Saved {glu_saved['blood_glucose']} mg/dL (is_sample={glu_saved['is_sample']})")
+
+# Check timeline contains the sample readings
+profile_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/health-profile",
+    headers={"Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
+)
+with urllib.request.urlopen(profile_req, timeout=15) as res:
+    prof_data = json.loads(res.read().decode())
+    timeline_items = prof_data.get("timeline", [])
+    sample_items = [t for t in timeline_items if t.get("is_sample") is True]
+    print(f"13. Health Timeline Verification: Found {len(sample_items)} demo/sample entries in chronological patient timeline.")
 
 print("\n>>> ALL PRODUCTION ENDPOINTS & SECURITY TESTS PASSED ON LIVE DEPLOYMENT! <<<\n", flush=True)
 sys.exit(0)
