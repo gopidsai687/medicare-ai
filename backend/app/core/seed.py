@@ -2,7 +2,7 @@
 Auto-seeder for MediCare AI.
 Guarantees standard clinical demo credentials exist for production evaluation.
 """
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 import uuid
 import structlog
 from sqlalchemy import select
@@ -15,6 +15,7 @@ from app.models.patient import Patient, BloodType, Gender
 from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
 from app.models.prescription import Prescription, PrescriptionStatus
 from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
+from app.models.vital_sign import VitalSign, VitalReminder, VitalSharingConsent
 
 log = structlog.get_logger(__name__)
 
@@ -210,6 +211,210 @@ async def seed_initial_data(session: AsyncSession) -> None:
                 session.add_all([rec1, rec2])
                 await session.flush()
                 log.info("Seeded baseline medical records for Alice Johnson")
+
+            # 7. VitalSense Telemetry for Alice Johnson
+            res_vitals = await session.execute(
+                select(VitalSign).where(VitalSign.patient_id == pat_profile.id)
+            )
+            if not res_vitals.scalars().first():
+                now = datetime.now(timezone.utc)
+                sample_readings = [
+                    # Day -28
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=28, hours=2),
+                        systolic_bp=128,
+                        diastolic_bp=82,
+                        heart_rate=72,
+                        weight=64.5,
+                        measurement_source="manual_entry",
+                        notes="Morning reading before breakfast",
+                        is_patient_entered=True,
+                        is_sample=False,
+                    ),
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=28, hours=1),
+                        blood_glucose=95.0,
+                        blood_glucose_mmol=5.27,
+                        glucose_unit="mg/dL",
+                        glucose_context="fasting",
+                        measurement_source="manual_entry",
+                        is_patient_entered=True,
+                        is_sample=False,
+                    ),
+                    # Day -21
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=21, hours=3),
+                        systolic_bp=122,
+                        diastolic_bp=78,
+                        heart_rate=70,
+                        measurement_source="omron_connect",
+                        device_name="Omron Evolv BP7000",
+                        notes="Bluetooth sync from Omron cuff",
+                        is_patient_entered=False,
+                        is_sample=False,
+                    ),
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=21),
+                        blood_glucose=138.0,
+                        blood_glucose_mmol=7.66,
+                        glucose_unit="mg/dL",
+                        glucose_context="after_meal",
+                        measurement_source="dexcom_cgm",
+                        device_name="Dexcom G7 Continuous Glucose Monitor",
+                        is_patient_entered=False,
+                        is_sample=False,
+                    ),
+                    # Day -14
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=14, hours=4),
+                        systolic_bp=134,
+                        diastolic_bp=86,
+                        heart_rate=78,
+                        weight=64.2,
+                        measurement_source="manual_entry",
+                        notes="Felt slightly stressed after work",
+                        is_patient_entered=True,
+                        is_sample=False,
+                    ),
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=14, hours=2),
+                        blood_glucose=92.0,
+                        blood_glucose_mmol=5.11,
+                        glucose_unit="mg/dL",
+                        glucose_context="fasting",
+                        measurement_source="dexcom_cgm",
+                        device_name="Dexcom G7 Continuous Glucose Monitor",
+                        is_patient_entered=False,
+                        is_sample=False,
+                    ),
+                    # Day -7
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=7, hours=2),
+                        systolic_bp=118,
+                        diastolic_bp=76,
+                        heart_rate=68,
+                        weight=64.0,
+                        measurement_source="omron_connect",
+                        device_name="Omron Evolv BP7000",
+                        notes="Post-exercise rest period",
+                        is_patient_entered=False,
+                        is_sample=False,
+                    ),
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=7),
+                        blood_glucose=125.0,
+                        blood_glucose_mmol=6.94,
+                        glucose_unit="mg/dL",
+                        glucose_context="after_meal",
+                        measurement_source="manual_entry",
+                        is_patient_entered=True,
+                        is_sample=False,
+                    ),
+                    # Day -2
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=2, hours=3),
+                        systolic_bp=120,
+                        diastolic_bp=78,
+                        heart_rate=71,
+                        weight=63.8,
+                        measurement_source="manual_entry",
+                        notes="Routine morning vitals",
+                        is_patient_entered=True,
+                        is_sample=False,
+                    ),
+                    VitalSign(
+                        id=uuid.uuid4(),
+                        patient_id=pat_profile.id,
+                        recorded_by_id=pat_user.id,
+                        recorded_at=now - timedelta(days=2, hours=1),
+                        blood_glucose=89.0,
+                        blood_glucose_mmol=4.94,
+                        glucose_unit="mg/dL",
+                        glucose_context="fasting",
+                        measurement_source="dexcom_cgm",
+                        device_name="Dexcom G7 Continuous Glucose Monitor",
+                        is_patient_entered=False,
+                        is_sample=False,
+                    ),
+                ]
+                session.add_all(sample_readings)
+                await session.flush()
+                log.info("Seeded 10 VitalSense telemetry records for Alice Johnson")
+
+            # 8. VitalSense Reminders
+            res_rem = await session.execute(
+                select(VitalReminder).where(VitalReminder.patient_id == pat_profile.id)
+            )
+            if not res_rem.scalars().first():
+                rem1 = VitalReminder(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    reminder_type="bp",
+                    label="Morning Blood Pressure Check",
+                    time_of_day="08:00 AM",
+                    frequency="daily",
+                    days_of_week="Mon,Tue,Wed,Thu,Fri,Sat,Sun",
+                    is_active=True,
+                )
+                rem2 = VitalReminder(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    reminder_type="glucose",
+                    label="Fasting Glucose Log",
+                    time_of_day="07:30 AM",
+                    frequency="weekdays",
+                    days_of_week="Mon,Tue,Wed,Thu,Fri",
+                    is_active=True,
+                )
+                session.add_all([rem1, rem2])
+                await session.flush()
+                log.info("Seeded vital reminders for Alice Johnson")
+
+            # 9. Active Sharing Consent with Dr. Sarah Chen
+            res_consent = await session.execute(
+                select(VitalSharingConsent).where(
+                    VitalSharingConsent.patient_id == pat_profile.id,
+                    VitalSharingConsent.doctor_id == doc_profile.id,
+                )
+            )
+            if not res_consent.scalar_one_or_none():
+                consent = VitalSharingConsent(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    is_active=True,
+                    notes="Patient consented to share continuous home telemetry for preventive hypertension care.",
+                )
+                session.add(consent)
+                await session.flush()
+                log.info("Seeded active VitalSense sharing consent for Dr. Sarah Chen")
 
         await session.commit()
         log.info("Baseline clinical accounts verification/seeding completed successfully.")

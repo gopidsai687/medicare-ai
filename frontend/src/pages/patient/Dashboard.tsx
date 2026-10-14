@@ -272,9 +272,12 @@ export default function PatientDashboard() {
               </div>
             ))}
           </div>
-          <p style={{ fontSize: '0.7rem', color: '#3a5070', marginTop: 14, textAlign: 'center' }}>
-            Last recorded: Sep 18, 2026
-          </p>
+          <button
+            onClick={() => navigate('/patient/vitalsense')}
+            className="w-full mt-4 py-2 px-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all"
+          >
+            <Heart size={14} /> Open VitalSense Monitor →
+          </button>
         </div>
       </div>
     </div>

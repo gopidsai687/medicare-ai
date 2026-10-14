@@ -17,10 +17,13 @@ const PatientAIAssistant = lazy(() => import('@/pages/patient/AIAssistant'))
 const PatientPrescriptionAnalysis = lazy(() => import('@/pages/patient/PrescriptionAnalysis'))
 const PatientMedicalReportAnalysis = lazy(() => import('@/pages/patient/MedicalReportAnalysis'))
 const PatientPreviousAnalyses = lazy(() => import('@/pages/patient/PreviousAnalyses'))
+const PatientVitalSense = lazy(() => import('@/pages/patient/VitalSense'))
+const PatientPPGResearch = lazy(() => import('@/pages/patient/PPGResearch'))
 const PatientSettings = lazy(() => import('@/pages/patient/Settings'))
 
 // Doctor
 const DoctorDashboard = lazy(() => import('@/pages/doctor/Dashboard'))
+const DoctorVitalSenseClinical = lazy(() => import('@/pages/doctor/VitalSenseClinical'))
 const DoctorPatients = lazy(() => import('@/pages/doctor/MyPatients'))
 const DoctorSchedule = lazy(() => import('@/pages/doctor/Schedule'))
 const DoctorEncounters = lazy(() => import('@/pages/doctor/Encounters'))
@@ -75,6 +78,8 @@ export const router = createBrowserRouter([
           { path: '/patient/prescriptions', element: withSuspense(PatientPrescriptionAnalysis) },
           { path: '/patient/reports', element: withSuspense(PatientMedicalReportAnalysis) },
           { path: '/patient/analyses', element: withSuspense(PatientPreviousAnalyses) },
+          { path: '/patient/vitalsense', element: withSuspense(PatientVitalSense) },
+          { path: '/patient/vitalsense/research', element: withSuspense(PatientPPGResearch) },
           { path: '/patient/settings', element: withSuspense(PatientSettings) },
         ],
       },
@@ -89,6 +94,7 @@ export const router = createBrowserRouter([
         element: <AppShell />,
         children: [
           { path: '/doctor', element: withSuspense(DoctorDashboard) },
+          { path: '/doctor/vitalsense', element: withSuspense(DoctorVitalSenseClinical) },
           { path: '/doctor/patients', element: withSuspense(DoctorPatients) },
           { path: '/doctor/schedule', element: withSuspense(DoctorSchedule) },
           { path: '/doctor/encounters', element: withSuspense(DoctorEncounters) },

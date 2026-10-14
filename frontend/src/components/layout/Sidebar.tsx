@@ -19,6 +19,7 @@ import {
   FileSearch,
   Pill,
   Sparkles,
+  Microscope,
   LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
@@ -32,6 +33,8 @@ interface NavItem {
 
 const PATIENT_NAV: NavItem[] = [
   { to: '/patient', icon: Home, label: 'Dashboard' },
+  { to: '/patient/vitalsense', icon: Heart, label: 'MediCare VitalSense' },
+  { to: '/patient/vitalsense/research', icon: Microscope, label: 'PPG Research Lab' },
   { to: '/patient/prescriptions', icon: Pill, label: 'Prescription Analyzer' },
   { to: '/patient/reports', icon: FileSearch, label: 'Medical Report Analyzer' },
   { to: '/patient/analyses', icon: Sparkles, label: 'Previous AI Analyses' },
@@ -45,6 +48,7 @@ const PATIENT_NAV: NavItem[] = [
 
 const DOCTOR_NAV: NavItem[] = [
   { to: '/doctor', icon: Home, label: 'Dashboard' },
+  { to: '/doctor/vitalsense', icon: Heart, label: 'VitalSense Clinical' },
   { to: '/doctor/patients', icon: Users, label: 'My Patients' },
   { to: '/doctor/schedule', icon: Calendar, label: 'Schedule' },
   { to: '/doctor/encounters', icon: Stethoscope, label: 'Encounters' },

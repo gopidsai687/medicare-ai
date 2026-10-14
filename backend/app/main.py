@@ -21,6 +21,8 @@ from app.api.v1 import (
 log = structlog.get_logger(__name__)
 
 
+from sqlalchemy import text
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle."""
@@ -28,6 +30,28 @@ async def lifespan(app: FastAPI):
     # Create tables (dev convenience — production uses Alembic migrations)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        
+        # Self-healing columns for vital_signs
+        is_pg = "postgresql" in settings.DATABASE_URL.lower()
+        cols_to_add = [
+            ("measurement_source", "VARCHAR(50) DEFAULT 'manual_entry' NOT NULL"),
+            ("device_name", "VARCHAR(100)"),
+            ("blood_glucose_mmol", "FLOAT"),
+            ("glucose_unit", "VARCHAR(10) DEFAULT 'mg/dL' NOT NULL"),
+            ("glucose_context", "VARCHAR(50) DEFAULT 'fasting'"),
+            ("notes", "VARCHAR(500)"),
+            ("clinical_notes", "VARCHAR(1000)"),
+            ("is_patient_entered", "BOOLEAN DEFAULT TRUE NOT NULL"),
+            ("is_sample", "BOOLEAN DEFAULT FALSE NOT NULL"),
+        ]
+        for col_name, col_def in cols_to_add:
+            try:
+                if is_pg:
+                    await conn.execute(text(f"ALTER TABLE vital_signs ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
+                else:
+                    await conn.execute(text(f"ALTER TABLE vital_signs ADD COLUMN {col_name} {col_def}"))
+            except Exception:
+                pass
     log.info("Database tables ready")
     try:
         async with AsyncSessionFactory() as session:

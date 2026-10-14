@@ -19,7 +19,14 @@ from app.models.medical_report_analysis import (
     MedicalReportAnalysisResult,
     MedicalReportChatMessage,
 )
-from app.models.vital_sign import VitalSign
+from app.models.vital_sign import (
+    VitalSign,
+    MeasurementSource,
+    GlucoseContext,
+    VitalReminder,
+    VitalSharingConsent,
+    WebAuthnCredential,
+)
 from app.models.encounter import Encounter, EncounterType, EncounterStatus
 from app.models.audit_log import AuditLog, AuditAction, AuditSeverity
 
@@ -108,6 +115,11 @@ __all__ = [
     "MedicalReportAnalysisResult",
     "MedicalReportChatMessage",
     "VitalSign",
+    "MeasurementSource",
+    "GlucoseContext",
+    "VitalReminder",
+    "VitalSharingConsent",
+    "WebAuthnCredential",
     "Encounter",
     "EncounterType",
     "EncounterStatus",
