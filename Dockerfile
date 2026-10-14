@@ -4,7 +4,8 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci || npm install
 COPY frontend/ ./
-RUN npm run build
+ENV NODE_OPTIONS="--max-old-space-size=512"
+RUN npx vite build || npm run build
 
 # Stage 2: Production Python Backend + Embedded SPA
 FROM python:3.12-slim

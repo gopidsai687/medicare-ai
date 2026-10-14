@@ -27,60 +27,67 @@ from sqlalchemy import text
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle."""
     log.info("MediCare API starting", environment=settings.ENVIRONMENT)
-    # Create tables (dev convenience — production uses Alembic migrations)
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        
-        # Self-healing columns for vital_signs
-        is_pg = "postgresql" in settings.DATABASE_URL.lower()
-        cols_to_add = [
-            ("measurement_source", "VARCHAR(50) DEFAULT 'manual_entry' NOT NULL"),
-            ("device_name", "VARCHAR(100)"),
-            ("blood_glucose_mmol", "FLOAT"),
-            ("glucose_unit", "VARCHAR(10) DEFAULT 'mg/dL' NOT NULL"),
-            ("glucose_context", "VARCHAR(50) DEFAULT 'fasting'"),
-            ("notes", "VARCHAR(500)"),
-            ("clinical_notes", "VARCHAR(1000)"),
-            ("is_patient_entered", "BOOLEAN DEFAULT TRUE NOT NULL"),
-            ("is_sample", "BOOLEAN DEFAULT FALSE NOT NULL"),
-        ]
-        for col_name, col_def in cols_to_add:
-            try:
-                if is_pg:
-                    await conn.execute(text(f"ALTER TABLE vital_signs ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
-                else:
-                    await conn.execute(text(f"ALTER TABLE vital_signs ADD COLUMN {col_name} {col_def}"))
-            except Exception:
-                pass
+    
+    # 1. Create tables safely
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        log.info("Database Base.metadata.create_all completed")
+    except Exception as e:
+        log.error("Table creation encountered error (continuing startup)", error=str(e))
 
-        alert_cols = [
-            ("doctor_review_notes", "VARCHAR(1000)"),
-            ("follow_up_action", "VARCHAR(500)"),
-            ("actioned_by_id", "VARCHAR(36)"),
-            ("actioned_at", "TIMESTAMP"),
-        ]
-        for col_name, col_def in alert_cols:
-            try:
-                if is_pg:
-                    await conn.execute(text(f"ALTER TABLE vital_alerts ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
-                else:
-                    await conn.execute(text(f"ALTER TABLE vital_alerts ADD COLUMN {col_name} {col_def}"))
-            except Exception:
-                pass
+    # 2. Self-healing column additions with individual transaction isolation
+    try:
+        def get_existing_columns(sync_conn, table_name: str) -> set:
+            from sqlalchemy import inspect
+            inspector = inspect(sync_conn)
+            if not inspector.has_table(table_name):
+                return set()
+            return {c["name"] for c in inspector.get_columns(table_name)}
 
-        passkey_cols = [
-            ("transports", "VARCHAR(255)"),
-            ("last_used_at", "TIMESTAMP"),
-        ]
-        for col_name, col_def in passkey_cols:
-            try:
-                if is_pg:
-                    await conn.execute(text(f"ALTER TABLE webauthn_credentials ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
-                else:
-                    await conn.execute(text(f"ALTER TABLE webauthn_credentials ADD COLUMN {col_name} {col_def}"))
-            except Exception:
-                pass
-    log.info("Database tables ready")
+        async with engine.connect() as check_conn:
+            # Vital signs columns
+            existing_vital_cols = await check_conn.run_sync(get_existing_columns, "vital_signs")
+            cols_to_add = [
+                ("measurement_source", "VARCHAR(50) DEFAULT 'manual_entry' NOT NULL"),
+                ("device_name", "VARCHAR(100)"),
+                ("blood_glucose_mmol", "FLOAT"),
+                ("glucose_unit", "VARCHAR(10) DEFAULT 'mg/dL' NOT NULL"),
+                ("glucose_context", "VARCHAR(50) DEFAULT 'fasting'"),
+                ("notes", "VARCHAR(500)"),
+                ("clinical_notes", "VARCHAR(1000)"),
+                ("is_patient_entered", "BOOLEAN DEFAULT TRUE NOT NULL"),
+                ("is_sample", "BOOLEAN DEFAULT FALSE NOT NULL"),
+            ]
+            for col_name, col_def in cols_to_add:
+                if col_name not in existing_vital_cols:
+                    try:
+                        async with engine.begin() as alter_conn:
+                            await alter_conn.execute(text(f"ALTER TABLE vital_signs ADD COLUMN {col_name} {col_def}"))
+                        log.info("Added self-healing column", table="vital_signs", column=col_name)
+                    except Exception as err:
+                        log.warning("Column addition skipped", table="vital_signs", column=col_name, error=str(err))
+
+            # Vital alerts columns
+            existing_alert_cols = await check_conn.run_sync(get_existing_columns, "vital_alerts")
+            alert_cols = [
+                ("doctor_review_notes", "VARCHAR(1000)"),
+                ("follow_up_action", "VARCHAR(500)"),
+                ("actioned_by_id", "VARCHAR(36)"),
+                ("actioned_at", "TIMESTAMP"),
+            ]
+            for col_name, col_def in alert_cols:
+                if col_name not in existing_alert_cols:
+                    try:
+                        async with engine.begin() as alter_conn:
+                            await alter_conn.execute(text(f"ALTER TABLE vital_alerts ADD COLUMN {col_name} {col_def}"))
+                        log.info("Added self-healing column", table="vital_alerts", column=col_name)
+                    except Exception as err:
+                        log.warning("Column addition skipped", table="vital_alerts", column=col_name, error=str(err))
+    except Exception as exc:
+        log.warning("Self-healing schema migration warning", error=str(exc))
+
+    log.info("Database tables and columns verified")
     try:
         async with AsyncSessionFactory() as session:
             await seed_initial_data(session)
@@ -150,11 +157,11 @@ from fastapi.responses import FileResponse
 from fastapi import HTTPException
 
 dist_candidates = [
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "dist")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "static")),
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "static")),
     os.path.abspath("static"),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "dist")),
     os.path.abspath("frontend/dist"),
     os.path.abspath("../frontend/dist"),
 ]
