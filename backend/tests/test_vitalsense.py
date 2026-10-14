@@ -466,3 +466,73 @@ async def test_vitalsense_test_mode_simulation():
         assert clear_res.json()["deleted_count"] >= 1
 
 
+@pytest.mark.asyncio
+async def test_blood_pressure_and_glucose_test_mode_and_timeline():
+    """Verify entering fictional test readings via dedicated endpoints and checking their appearance in timeline."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        login_res = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        assert login_res.status_code == 200
+        token = login_res.json()["access_token"]
+        headers = {"Authorization": f"Bearer {token}"}
+        # 1. Post BP test reading using field aliases
+        bp_res = await client.post(
+            "/api/v1/vitals/blood-pressure",
+            headers=headers,
+            json={
+                "systolic": 134,
+                "diastolic": 86,
+                "heart_rate": 78,
+                "measurement_source": "manual",
+                "notes": "[DEMO TEST] Blood pressure simulation test",
+                "is_sample": True,
+            },
+        )
+        assert bp_res.status_code == 201
+        bp_data = bp_res.json()
+        assert bp_data["systolic_bp"] == 134
+        assert bp_data["diastolic_bp"] == 86
+        assert bp_data["is_sample"] is True
+        assert bp_data["measurement_source"] == "SAMPLE_DATA"
+        assert bp_data["bp_category"] == "Hypertension Stage 1"
+
+        # 2. Post Glucose test reading using field aliases
+        glu_res = await client.post(
+            "/api/v1/vitals/blood-glucose",
+            headers=headers,
+            json={
+                "glucose_value": 118.0,
+                "unit": "mg/dL",
+                "context": "fasting",
+                "notes": "[DEMO TEST] Fasting glucose simulation test",
+                "is_sample": True,
+            },
+        )
+        assert glu_res.status_code == 201
+        glu_data = glu_res.json()
+        assert glu_data["blood_glucose"] == 118.0
+        assert glu_data["is_sample"] is True
+        assert glu_data["glucose_category"] == "Impaired Fasting (Pre-diabetes)"
+
+        # 3. Check /vitals/history includes both test readings
+        hist_res = await client.get("/api/v1/vitals/history?limit=10", headers=headers)
+        assert hist_res.status_code == 200
+        history = hist_res.json()
+        sample_readings = [r for r in history if r.get("is_sample") is True]
+        assert len(sample_readings) >= 2
+
+        # 4. Check Health Timeline includes the test readings tagged with is_sample
+        profile_res = await client.get("/api/v1/vitals/health-profile", headers=headers)
+        assert profile_res.status_code == 200
+        profile = profile_res.json()
+        timeline = profile.get("timeline", [])
+        sample_timeline_items = [t for t in timeline if t.get("is_sample") is True]
+        assert len(sample_timeline_items) >= 2
+        assert any("BP: 134/86 mmHg" in t.get("summary", "") for t in sample_timeline_items)
+        assert any("Glucose: 118.0 mg/dL" in t.get("summary", "") for t in sample_timeline_items)
+
+
+

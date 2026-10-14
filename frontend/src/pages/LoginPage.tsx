@@ -47,6 +47,11 @@ export default function LoginPage() {
     nurse: '/doctor',
   }
 
+  const { register, handleSubmit, setValue, getValues, formState: { errors } } = useForm<FormData>({
+    resolver: zodResolver(schema),
+    defaultValues: DEMO_CREDENTIALS[initialPortal],
+  })
+
   const handlePasskeySignIn = async () => {
     setError(null)
     setPasskeyNotice(null)
@@ -59,7 +64,8 @@ export default function LoginPage() {
 
     setIsPasskeyLoading(true)
     try {
-      const currentEmail = DEMO_CREDENTIALS[selectedPortal]?.email
+      const typedEmail = getValues('email')
+      const currentEmail = typedEmail?.trim() || DEMO_CREDENTIALS[selectedPortal]?.email
       const authUser = await loginWithPasskey(currentEmail)
       const verifiedRole = authUser?.role?.toLowerCase() || localStorage.getItem('user_role')?.toLowerCase() || 'patient'
       const defaultPath = roleMap[verifiedRole] ?? '/patient'
@@ -76,21 +82,6 @@ export default function LoginPage() {
       setIsPasskeyLoading(false)
     }
   }
-
-
-  // Auto-redirect if user already has an active session
-  useEffect(() => {
-    if (!authLoading && user) {
-      const defaultPath = roleMap[user.role.toLowerCase()] || '/patient'
-      const target = (from && from.startsWith(defaultPath)) ? from : defaultPath
-      navigate(target, { replace: true })
-    }
-  }, [user, authLoading, navigate, from])
-
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: DEMO_CREDENTIALS[initialPortal],
-  })
 
   const handleSelectPortal = (role: string) => {
     setSelectedPortal(role)

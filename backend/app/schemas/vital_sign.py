@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Optional
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 # ---------------------------------------------------------
@@ -126,8 +126,8 @@ class VitalSignRead(VitalSignBase):
 # Patient Logging Request Schemas
 # ---------------------------------------------------------
 class BloodPressureLogRequest(BaseModel):
-    systolic_bp: int = Field(..., ge=50, le=280, description="Systolic pressure (mmHg)")
-    diastolic_bp: int = Field(..., ge=30, le=180, description="Diastolic pressure (mmHg)")
+    systolic_bp: int = Field(..., validation_alias=AliasChoices("systolic_bp", "systolic"), ge=50, le=280, description="Systolic pressure (mmHg)")
+    diastolic_bp: int = Field(..., validation_alias=AliasChoices("diastolic_bp", "diastolic"), ge=30, le=180, description="Diastolic pressure (mmHg)")
     heart_rate: Optional[int] = Field(None, ge=30, le=240, description="Optional pulse rate (bpm)")
     recorded_at: Optional[datetime] = None
     measurement_source: str = Field("manual_entry", description="Source of reading")
@@ -145,9 +145,9 @@ class BloodPressureLogRequest(BaseModel):
 
 
 class BloodGlucoseLogRequest(BaseModel):
-    blood_glucose: float = Field(..., description="Glucose value in specified unit")
-    glucose_unit: str = Field("mg/dL", description="'mg/dL' or 'mmol/L'")
-    glucose_context: str = Field("fasting", description="fasting, before_meal, after_meal, bedtime, random")
+    blood_glucose: float = Field(..., validation_alias=AliasChoices("blood_glucose", "glucose_value", "value"), description="Glucose value in specified unit")
+    glucose_unit: str = Field("mg/dL", validation_alias=AliasChoices("glucose_unit", "unit"), description="'mg/dL' or 'mmol/L'")
+    glucose_context: str = Field("fasting", validation_alias=AliasChoices("glucose_context", "context"), description="fasting, before_meal, after_meal, bedtime, random")
     recorded_at: Optional[datetime] = None
     measurement_source: str = Field("manual_entry", description="Source of reading")
     device_name: Optional[str] = Field(None, max_length=100)

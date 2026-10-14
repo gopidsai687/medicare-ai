@@ -171,6 +171,7 @@ async def _verify_doctor_access(
 # Core Vitals CRUD & Queries
 # -----------------------------------------------------------------------------
 @router.get("", response_model=List[VitalSignRead])
+@router.get("/history", response_model=List[VitalSignRead])
 async def get_vital_signs(
     patient_id: Optional[uuid.UUID] = None,
     limit: int = 100,

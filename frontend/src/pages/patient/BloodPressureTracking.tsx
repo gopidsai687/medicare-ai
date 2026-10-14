@@ -85,6 +85,7 @@ export default function BloodPressureTracking() {
     measurement_source: 'manual',
     device_name: '',
     notes: '',
+    is_sample: false,
   })
 
   const fetchReadings = async () => {
@@ -134,13 +135,14 @@ export default function BloodPressureTracking() {
     try {
       setSubmitting(true)
       const res = await api.post('/api/v1/vitals/blood-pressure', {
-        systolic: sys,
-        diastolic: dia,
+        systolic_bp: sys,
+        diastolic_bp: dia,
         heart_rate: hr,
         recorded_at: new Date(formData.recorded_at).toISOString(),
-        measurement_source: formData.measurement_source,
-        device_name: formData.device_name || undefined,
-        notes: formData.notes || undefined,
+        measurement_source: formData.is_sample ? 'SAMPLE_DATA' : formData.measurement_source,
+        device_name: formData.device_name || (formData.is_sample ? 'Clinical Simulator' : undefined),
+        notes: formData.notes || (formData.is_sample ? '[DEMO TEST] Blood pressure simulation' : undefined),
+        is_sample: formData.is_sample,
       })
 
       // Check if an immediate alert was triggered
@@ -162,6 +164,7 @@ export default function BloodPressureTracking() {
         measurement_source: 'manual',
         device_name: '',
         notes: '',
+        is_sample: false,
       })
       await fetchReadings()
     } catch (err: any) {
@@ -834,6 +837,47 @@ export default function BloodPressureTracking() {
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
                   style={{ width: '100%', padding: '10px 14px', borderRadius: 8, background: 'rgba(10,22,40,0.8)', color: '#f8fafc', border: '1px solid rgba(255,255,255,0.1)' }}
                 />
+              </div>
+
+              {/* Demo Mode / Fictional Test Reading Toggle */}
+              <div
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: 10,
+                  background: formData.is_sample ? 'rgba(245,158,11,0.12)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${formData.is_sample ? 'rgba(245,158,11,0.35)' : 'rgba(255,255,255,0.08)'}`,
+                  transition: 'all 0.2s ease',
+                }}
+              >
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={formData.is_sample}
+                    onChange={(e) => {
+                      const checked = e.target.checked
+                      setFormData({
+                        ...formData,
+                        is_sample: checked,
+                        measurement_source: checked ? 'SAMPLE_DATA' : 'manual',
+                        notes: checked && !formData.notes ? '[DEMO TEST] Simulated blood pressure reading' : formData.notes,
+                      })
+                    }}
+                    style={{ width: 16, height: 16, accentColor: '#f59e0b', cursor: 'pointer' }}
+                  />
+                  <div>
+                    <div style={{ fontSize: '0.825rem', fontWeight: 700, color: formData.is_sample ? '#fbbf24' : '#cbd5e1', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span>Save as Fictional Test Reading (Demo Mode)</span>
+                      {formData.is_sample && (
+                        <span style={{ fontSize: '0.65rem', background: 'rgba(245,158,11,0.2)', color: '#fbbf24', padding: '1px 6px', borderRadius: 4 }}>
+                          SAMPLE
+                        </span>
+                      )}
+                    </div>
+                    <p style={{ fontSize: '0.72rem', color: '#94a3b8', margin: '2px 0 0' }}>
+                      Fictional telemetry for testing clinical alert workflows. Never confused with real patient diagnostics.
+                    </p>
+                  </div>
+                </label>
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
