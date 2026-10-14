@@ -12,11 +12,14 @@ import {
   ChevronRight,
   ShieldCheck,
   RefreshCw,
-  ExternalLink,
   Sparkles,
+  FlaskConical,
+  FileText,
+  Download,
+  Plus,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
 import { api } from '@/lib/api'
+import { format } from 'date-fns'
 
 export interface BodyMapIndicator {
   system_name: string
@@ -51,7 +54,6 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedSystem, setSelectedSystem] = useState<string>('cardiovascular')
-  const [activeTab, setActiveTab] = useState<'map' | 'cards'>('map')
 
   const fetchBodyMap = async () => {
     try {
@@ -61,7 +63,7 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
       })
       setData(res.data)
       if (res.data?.indicators) {
-        // Default to urgent/attention indicator if exists
+        // Prioritize selecting urgent or attention system if present
         const urgentKey = Object.keys(res.data.indicators).find(
           (k) => res.data.indicators[k].status === 'urgent'
         )
@@ -82,41 +84,74 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
     fetchBodyMap()
   }, [patientId, refreshKey])
 
-  const getStatusColor = (status?: string) => {
+  const getStatusBadge = (status?: string) => {
     switch (status) {
       case 'urgent':
-        return { text: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', border: 'rgba(239, 68, 68, 0.4)', glow: '#ef4444' }
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
+            Urgent Review
+          </span>
+        )
       case 'attention':
-        return { text: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', border: 'rgba(245, 158, 11, 0.4)', glow: '#f59e0b' }
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
+            Attention State
+          </span>
+        )
       case 'normal':
-        return { text: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', border: 'rgba(16, 185, 129, 0.35)', glow: '#10b981' }
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+            Within Target Band
+          </span>
+        )
       case 'stale':
-        return { text: '#94a3b8', bg: 'rgba(148, 163, 184, 0.12)', border: 'rgba(148, 163, 184, 0.25)', glow: '#94a3b8' }
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700">
+            Stale Telemetry (&gt;7d)
+          </span>
+        )
       default:
-        return { text: '#64748b', bg: 'rgba(100, 116, 139, 0.1)', border: 'rgba(100, 116, 139, 0.2)', glow: '#475569' }
+        return (
+          <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-slate-800 text-slate-500 border border-slate-700">
+            No Telemetry Recorded
+          </span>
+        )
+    }
+  }
+
+  const getStatusColorTokens = (status?: string) => {
+    switch (status) {
+      case 'urgent':
+        return { text: '#f43f5e', bg: 'rgba(244,63,94,0.15)', border: 'rgba(244,63,94,0.4)', dot: '#f43f5e' }
+      case 'attention':
+        return { text: '#f59e0b', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.4)', dot: '#f59e0b' }
+      case 'normal':
+        return { text: '#10b981', bg: 'rgba(16,185,129,0.15)', border: 'rgba(16,185,129,0.4)', dot: '#10b981' }
+      default:
+        return { text: '#64748b', bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.25)', dot: '#64748b' }
     }
   }
 
   const getSystemIcon = (system: string) => {
     switch (system) {
       case 'cardiovascular':
-        return <Activity size={18} />
+        return <Activity size={18} className="text-teal-400" />
       case 'heart':
-        return <Heart size={18} />
+        return <Heart size={18} className="text-rose-400" />
       case 'metabolic':
-        return <Droplet size={18} />
+        return <Droplet size={18} className="text-cyan-400" />
       case 'respiratory':
-        return <Wind size={18} />
+        return <Wind size={18} className="text-blue-400" />
       case 'biometrics':
-        return <Scale size={18} />
+        return <Scale size={18} className="text-amber-400" />
       default:
-        return <Activity size={18} />
+        return <Activity size={18} className="text-slate-400" />
     }
   }
 
   const indicators = data?.indicators || {}
   const activeIndicator: BodyMapIndicator | undefined = indicators[selectedSystem]
-  const activeColor = getStatusColor(activeIndicator?.status)
+  const activeTokens = getStatusColorTokens(activeIndicator?.status)
 
   // Hotspot coordinates on the SVG coordinate system (300 x 440)
   const hotspots: Record<string, { x: number; y: number; label: string; side: 'left' | 'right' }> = {
@@ -124,233 +159,173 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
     cardiovascular: { x: 88, y: 185, label: 'Blood Pressure', side: 'left' },
     metabolic: { x: 145, y: 220, label: 'Blood Glucose', side: 'right' },
     respiratory: { x: 135, y: 130, label: 'Respiratory', side: 'left' },
-    biometrics: { x: 150, y: 285, label: 'Biometrics', side: 'right' },
+    biometrics: { x: 150, y: 285, label: 'Body Mass', side: 'right' },
   }
 
   return (
-    <div className="glass" style={{ padding: compact ? '20px' : '28px', position: 'relative', overflow: 'hidden' }}>
-      {/* Background ambient medical glow */}
-      <div
-        style={{
-          position: 'absolute',
-          top: -60,
-          right: -60,
-          width: 240,
-          height: 240,
-          borderRadius: '50%',
-          background: 'radial-gradient(circle, rgba(14,165,233,0.12) 0%, transparent 70%)',
-          pointerEvents: 'none',
-        }}
-      />
-
+    <div className="rounded-2xl border border-slate-800/80 bg-slate-900/90 shadow-xl overflow-hidden p-6 space-y-5">
       {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-800/80">
         <div>
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 20, background: 'rgba(14,165,233,0.1)', border: '1px solid rgba(14,165,233,0.2)', marginBottom: 6 }}>
-            <Sparkles size={12} color="#38bdf8" />
-            <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#38bdf8', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              Interactive Health Map
-            </span>
+          <div className="flex items-center gap-2 mb-1">
+            <Sparkles size={16} className="text-teal-400" />
+            <h2 className="text-base font-bold text-white tracking-wide">
+              Patient Body Map &amp; Anatomical Status
+            </h2>
           </div>
-          <h2 style={{ fontSize: compact ? '1.25rem' : '1.5rem', fontWeight: 700, color: '#f8fafc', margin: 0 }}>
-            Patient Body Map & Anatomical Status
-          </h2>
-          <p style={{ fontSize: '0.825rem', color: '#94a3b8', margin: '4px 0 0' }}>
-            Exploratory visual representation of verified vital telemetry mapped to anatomical organ systems.
+          <p className="text-xs text-slate-400">
+            Interactive physiological model reflecting recorded numerical telemetry across body systems.
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button
-            onClick={fetchBodyMap}
-            disabled={loading}
-            style={{
-              padding: '7px 12px',
-              borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.08)',
-              background: 'rgba(15,32,64,0.6)',
-              color: '#94a3b8',
-              fontSize: '0.78rem',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              cursor: 'pointer',
-            }}
-          >
-            <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+        <button
+          onClick={fetchBodyMap}
+          disabled={loading}
+          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+        >
+          <RefreshCw size={13} className={loading ? 'animate-spin text-teal-400' : ''} />
+          <span>Refresh Map</span>
+        </button>
+      </div>
+
+      {/* Mandatory Clinical Transparency Disclaimer */}
+      <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400 flex items-start gap-2.5">
+        <Info size={15} className="text-teal-400 shrink-0 mt-0.5" />
+        <div className="leading-relaxed">
+          <strong className="text-slate-200">Educational Anatomical Model:</strong> This graphic visualizes verified clinical records (Home cuff, fingerstick strips, Bluetooth monitors, or test records) mapped to physiological organ regions. This is an educational numerical visualizer — <em>not</em> an optical body scan, radiological image, or diagnostic procedure. Organ status reflects only direct metrics recorded for that system.
         </div>
       </div>
 
-      {/* Strict Medical Disclaimer Notice */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 10,
-          background: 'rgba(15,23,42,0.7)',
-          border: '1px solid rgba(148,163,184,0.15)',
-          borderRadius: 10,
-          padding: '8px 14px',
-          marginBottom: 20,
-        }}
-      >
-        <Info size={15} color="#38bdf8" style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: '0.75rem', color: '#cbd5e1', lineHeight: 1.4 }}>
-          <strong>Educational Telemetry Map:</strong> This anatomical graphic visualizes recorded patient measurements (Manual entries, Omron, Dexcom, or test data). It is an educational visual map of recorded numbers, <em>never</em> a real-time body scan, camera sensor, or diagnostic imaging device.
-        </span>
-      </div>
-
-      {/* Main Body Map Layout */}
-      <div style={{ display: 'grid', gridTemplateColumns: compact ? '1fr' : 'minmax(280px, 320px) 1fr', gap: 24, alignItems: 'start' }}>
-        {/* Left: Interactive SVG Body Map */}
-        <div
-          style={{
-            background: 'linear-gradient(180deg, rgba(10,22,40,0.85) 0%, rgba(5,12,26,0.95) 100%)',
-            border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 16,
-            padding: '20px 16px',
-            position: 'relative',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-          }}
-        >
+      {/* Main Interactive Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+        {/* Left: Anatomical SVG Silhouette (5 cols on lg) */}
+        <div className="lg:col-span-5 rounded-2xl border border-slate-800/80 bg-slate-950/60 p-5 flex flex-col items-center justify-center relative shadow-inner">
           {/* Status legend chips */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, justifyContent: 'center', marginBottom: 12 }}>
-            <span style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 4, color: '#10b981' }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#10b981' }} /> Normal
+          <div className="flex flex-wrap items-center justify-center gap-3 mb-4 text-[11px] font-mono">
+            <span className="inline-flex items-center gap-1.5 text-emerald-400">
+              <span className="w-2 h-2 rounded-full bg-emerald-400" /> Target Band
             </span>
-            <span style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 4, color: '#f59e0b' }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#f59e0b' }} /> Attention
+            <span className="inline-flex items-center gap-1.5 text-amber-400">
+              <span className="w-2 h-2 rounded-full bg-amber-400" /> Attention
             </span>
-            <span style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 4, color: '#ef4444' }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#ef4444' }} /> Urgent
+            <span className="inline-flex items-center gap-1.5 text-rose-400">
+              <span className="w-2 h-2 rounded-full bg-rose-400" /> Urgent
             </span>
-            <span style={{ fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 4, color: '#94a3b8' }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#94a3b8' }} /> Stale / None
+            <span className="inline-flex items-center gap-1.5 text-slate-500">
+              <span className="w-2 h-2 rounded-full bg-slate-600" /> No Data
             </span>
           </div>
 
-          {/* SVG Silhouette and Hotspots */}
-          <div style={{ position: 'relative', width: 280, height: 420 }}>
+          {/* SVG Canvas Container */}
+          <div className="relative w-64 h-96">
             <svg
               viewBox="0 0 300 440"
-              style={{ width: '100%', height: '100%', filter: 'drop-shadow(0 8px 24px rgba(0,0,0,0.4))' }}
+              className="w-full h-full drop-shadow-2xl"
+              aria-label="Interactive anatomical body map"
             >
               <defs>
-                <linearGradient id="bodyGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                <linearGradient id="bodyMesh" x1="0%" y1="0%" x2="100%" y2="100%">
                   <stop offset="0%" stopColor="#1e293b" />
                   <stop offset="50%" stopColor="#0f172a" />
                   <stop offset="100%" stopColor="#020617" />
                 </linearGradient>
-                <linearGradient id="glowLine" x1="0%" y1="0%" x2="0%" y2="100%">
-                  <stop offset="0%" stopColor="#0ea5e9" stopOpacity="0.8" />
-                  <stop offset="100%" stopColor="#14b8a6" stopOpacity="0.2" />
-                </linearGradient>
-                <radialGradient id="radarPulse" cx="50%" cy="50%" r="50%">
-                  <stop offset="0%" stopColor="#ef4444" stopOpacity="0.8" />
-                  <stop offset="100%" stopColor="#ef4444" stopOpacity="0" />
+                <radialGradient id="urgentPulse" cx="50%" cy="50%" r="50%">
+                  <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.8" />
+                  <stop offset="100%" stopColor="#f43f5e" stopOpacity="0" />
                 </radialGradient>
               </defs>
 
-              {/* Grid backdrop */}
-              <pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse">
+              {/* Grid Lines */}
+              <pattern id="bodyGrid" width="20" height="20" patternUnits="userSpaceOnUse">
                 <path d="M 20 0 L 0 0 0 20" fill="none" stroke="rgba(255,255,255,0.03)" strokeWidth="0.5" />
               </pattern>
-              <rect width="300" height="440" fill="url(#grid)" />
+              <rect width="300" height="440" fill="url(#bodyGrid)" />
 
               {/* Head */}
-              <ellipse cx="150" cy="52" rx="28" ry="34" fill="url(#bodyGrad)" stroke="rgba(56,189,248,0.25)" strokeWidth="1.5" />
+              <ellipse cx="150" cy="52" rx="28" ry="34" fill="url(#bodyMesh)" stroke="rgba(56,189,248,0.25)" strokeWidth="1.5" />
               {/* Neck */}
-              <rect x="142" y="85" width="16" height="18" rx="4" fill="url(#bodyGrad)" stroke="rgba(56,189,248,0.25)" strokeWidth="1.5" />
+              <rect x="142" y="85" width="16" height="18" rx="4" fill="url(#bodyMesh)" stroke="rgba(56,189,248,0.25)" strokeWidth="1.5" />
 
               {/* Torso & Shoulders */}
               <path
                 d="M 100 102 C 120 98, 180 98, 200 102 C 220 108, 224 135, 220 170 L 210 240 C 205 255, 195 265, 182 270 L 118 270 C 105 265, 95 255, 90 240 L 80 170 C 76 135, 80 108, 100 102 Z"
-                fill="url(#bodyGrad)"
+                fill="url(#bodyMesh)"
                 stroke="rgba(56,189,248,0.28)"
                 strokeWidth="1.5"
               />
 
-              {/* Left Arm (Patient Right) */}
+              {/* Arms */}
               <path
                 d="M 80 115 C 68 140, 58 175, 52 215 C 48 240, 44 265, 42 285 C 40 295, 46 300, 52 298 C 58 295, 66 270, 70 240 L 76 180"
                 fill="none"
                 stroke="rgba(56,189,248,0.25)"
-                strokeWidth="14"
+                strokeWidth="13"
                 strokeLinecap="round"
               />
-
-              {/* Right Arm (Patient Left) */}
               <path
                 d="M 220 115 C 232 140, 242 175, 248 215 C 252 240, 256 265, 258 285 C 260 295, 254 300, 248 298 C 242 295, 234 270, 230 240 L 224 180"
                 fill="none"
                 stroke="rgba(56,189,248,0.25)"
-                strokeWidth="14"
+                strokeWidth="13"
                 strokeLinecap="round"
               />
 
               {/* Hips & Pelvis */}
               <path
                 d="M 118 270 L 182 270 C 195 272, 202 288, 198 305 L 192 315 L 108 315 L 102 305 C 98 288, 105 272, 118 270 Z"
-                fill="url(#bodyGrad)"
+                fill="url(#bodyMesh)"
                 stroke="rgba(56,189,248,0.22)"
                 strokeWidth="1.5"
               />
 
-              {/* Left Leg */}
+              {/* Legs */}
               <path
                 d="M 112 315 L 108 370 C 106 395, 104 415, 102 430"
                 fill="none"
                 stroke="rgba(56,189,248,0.22)"
-                strokeWidth="16"
+                strokeWidth="15"
                 strokeLinecap="round"
               />
-
-              {/* Right Leg */}
               <path
                 d="M 188 315 L 192 370 C 194 395, 196 415, 198 430"
                 fill="none"
                 stroke="rgba(56,189,248,0.22)"
-                strokeWidth="16"
+                strokeWidth="15"
                 strokeLinecap="round"
               />
 
-              {/* Internal Vascular Lines (Aesthetics) */}
+              {/* Vascular pathways */}
               <path
                 d="M 150 90 L 150 240 M 150 145 L 88 185 M 150 145 L 210 185"
                 fill="none"
-                stroke="rgba(56,189,248,0.15)"
+                stroke="rgba(45,212,191,0.2)"
                 strokeWidth="1"
                 strokeDasharray="3 3"
               />
 
-              {/* Hotspot connection callout lines */}
+              {/* Callout Lines */}
               {Object.entries(hotspots).map(([key, spot]) => {
                 const ind = indicators[key]
-                const color = getStatusColor(ind?.status)
+                const colorTokens = getStatusColorTokens(ind?.status)
                 const isSelected = selectedSystem === key
                 return (
-                  <g key={`line-${key}`}>
-                    <line
-                      x1={spot.x}
-                      y1={spot.y}
-                      x2={spot.side === 'left' ? 30 : 270}
-                      y2={spot.y}
-                      stroke={isSelected ? color.text : 'rgba(148,163,184,0.2)'}
-                      strokeWidth={isSelected ? 1.5 : 0.75}
-                      strokeDasharray={isSelected ? 'none' : '2 2'}
-                    />
-                  </g>
+                  <line
+                    key={`line-${key}`}
+                    x1={spot.x}
+                    y1={spot.y}
+                    x2={spot.side === 'left' ? 24 : 276}
+                    y2={spot.y}
+                    stroke={isSelected ? colorTokens.text : 'rgba(148,163,184,0.25)'}
+                    strokeWidth={isSelected ? 1.5 : 0.75}
+                    strokeDasharray={isSelected ? 'none' : '2 2'}
+                  />
                 )
               })}
 
               {/* Interactive Hotspot Nodes */}
               {Object.entries(hotspots).map(([key, spot]) => {
                 const ind = indicators[key]
-                const color = getStatusColor(ind?.status)
+                const colorTokens = getStatusColorTokens(ind?.status)
                 const isSelected = selectedSystem === key
                 const isUrgent = ind?.status === 'urgent'
 
@@ -358,50 +333,37 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
                   <g
                     key={`node-${key}`}
                     onClick={() => setSelectedSystem(key)}
-                    style={{ cursor: 'pointer' }}
+                    className="cursor-pointer"
                   >
-                    {/* Urgent animated pulse halo */}
                     {isUrgent && (
-                      <circle cx={spot.x} cy={spot.y} r={22} fill="url(#radarPulse)">
-                        <animate attributeName="r" values="14;28;14" dur="2s" repeatCount="indefinite" />
+                      <circle cx={spot.x} cy={spot.y} r={22} fill="url(#urgentPulse)">
+                        <animate attributeName="r" values="14;26;14" dur="2s" repeatCount="indefinite" />
                         <animate attributeName="opacity" values="0.8;0.2;0.8" dur="2s" repeatCount="indefinite" />
                       </circle>
                     )}
 
-                    {/* Selection halo */}
                     {isSelected && (
                       <circle
                         cx={spot.x}
                         cy={spot.y}
                         r={16}
                         fill="none"
-                        stroke={color.text}
+                        stroke={colorTokens.text}
                         strokeWidth="1.5"
                         strokeDasharray="4 2"
-                      >
-                        <animateTransform
-                          attributeName="transform"
-                          type="rotate"
-                          from={`0 ${spot.x} ${spot.y}`}
-                          to={`360 ${spot.x} ${spot.y}`}
-                          dur="12s"
-                          repeatCount="indefinite"
-                        />
-                      </circle>
+                      />
                     )}
 
-                    {/* Outer indicator circle */}
                     <circle
                       cx={spot.x}
                       cy={spot.y}
                       r={10}
-                      fill={color.bg}
-                      stroke={color.border}
+                      fill={colorTokens.bg}
+                      stroke={colorTokens.border}
                       strokeWidth="2"
                     />
 
-                    {/* Core node dot */}
-                    <circle cx={spot.x} cy={spot.y} r={4.5} fill={color.text} />
+                    <circle cx={spot.x} cy={spot.y} r={4.5} fill={colorTokens.dot} />
                   </g>
                 )
               })}
@@ -410,29 +372,21 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
             {/* Clickable Floating Side Labels */}
             {Object.entries(hotspots).map(([key, spot]) => {
               const ind = indicators[key]
-              const color = getStatusColor(ind?.status)
+              const colorTokens = getStatusColorTokens(ind?.status)
               const isSelected = selectedSystem === key
 
               return (
                 <button
                   key={`btn-${key}`}
                   onClick={() => setSelectedSystem(key)}
-                  style={{
-                    position: 'absolute',
-                    top: spot.y - 14,
-                    ...(spot.side === 'left' ? { left: -6 } : { right: -6 }),
-                    background: isSelected ? color.bg : 'rgba(15,23,42,0.85)',
-                    border: `1px solid ${isSelected ? color.border : 'rgba(255,255,255,0.08)'}`,
-                    borderRadius: 6,
-                    padding: '3px 7px',
-                    color: isSelected ? color.text : '#cbd5e1',
-                    fontSize: '0.68rem',
-                    fontWeight: isSelected ? 700 : 500,
-                    cursor: 'pointer',
-                    boxShadow: isSelected ? `0 0 12px ${color.glow}44` : 'none',
-                    transition: 'all 0.2s ease',
-                    zIndex: 10,
-                  }}
+                  className={`absolute -translate-y-1/2 px-2 py-0.5 rounded text-[10px] font-semibold transition-all cursor-pointer z-10 ${
+                    spot.side === 'left' ? '-left-2' : '-right-2'
+                  } ${
+                    isSelected
+                      ? 'bg-slate-800 text-white border border-teal-500/50 shadow-md shadow-teal-500/10'
+                      : 'bg-slate-900/90 text-slate-300 border border-slate-800 hover:text-white hover:border-slate-700'
+                  }`}
+                  style={{ top: spot.y }}
                 >
                   {spot.label}
                 </button>
@@ -440,265 +394,147 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
             })}
           </div>
 
-          <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 12, textAlign: 'center' }}>
-            Tap any anatomical hotspot or organ label to inspect recorded telemetry.
-          </div>
+          <span className="text-[11px] text-slate-500 text-center mt-3">
+            Click any anatomical node to inspect recorded physiological records.
+          </span>
         </div>
 
-        {/* Right: Detailed Flyout Telemetry Inspector */}
-        <div
-          style={{
-            background: 'rgba(15,32,64,0.4)',
-            border: `1px solid ${activeColor.border}`,
-            borderRadius: 16,
-            padding: '24px',
-            position: 'relative',
-            boxShadow: `0 8px 32px rgba(0,0,0,0.25)`,
-          }}
-        >
+        {/* Right: Detailed Organ Status Drawer (7 cols on lg) */}
+        <div className="lg:col-span-7 rounded-2xl border border-slate-800/80 bg-slate-950/60 p-6 flex flex-col justify-between shadow-xl space-y-5">
           {activeIndicator ? (
-            <div>
-              {/* Top System Banner */}
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="space-y-5">
+              {/* Top Drawer Header */}
+              <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-800">
+                <div className="flex items-center gap-3">
                   <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: 10,
-                      background: activeColor.bg,
-                      border: `1px solid ${activeColor.border}`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      color: activeColor.text,
-                    }}
+                    className="w-10 h-10 rounded-xl flex items-center justify-center border"
+                    style={{ backgroundColor: activeTokens.bg, borderColor: activeTokens.border }}
                   >
                     {getSystemIcon(selectedSystem)}
                   </div>
                   <div>
-                    <h3 style={{ fontSize: '1.15rem', fontWeight: 700, color: '#f8fafc', margin: 0 }}>
+                    <h3 className="text-base font-bold text-white tracking-wide">
                       {activeIndicator.label}
                     </h3>
-                    <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
-                      System: <span style={{ textTransform: 'capitalize', color: '#cbd5e1' }}>{activeIndicator.system_name}</span>
-                    </div>
+                    <span className="text-xs text-slate-400 capitalize">
+                      Physiological System: {activeIndicator.system_name}
+                    </span>
                   </div>
                 </div>
 
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '5px 12px',
-                    borderRadius: 20,
-                    background: activeColor.bg,
-                    border: `1px solid ${activeColor.border}`,
-                    color: activeColor.text,
-                    fontSize: '0.75rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  {activeIndicator.status === 'urgent' && <AlertTriangle size={13} />}
-                  {activeIndicator.status === 'normal' && <CheckCircle2 size={13} />}
-                  {activeIndicator.status === 'stale' && <Clock size={13} />}
-                  <span>{activeIndicator.status_label}</span>
+                <div className="flex flex-col items-end gap-1">
+                  {getStatusBadge(activeIndicator.status)}
+                  <span className="text-[10px] text-slate-500 font-mono">
+                    {activeIndicator.history_count} total measurements logged
+                  </span>
                 </div>
               </div>
 
-              {/* Main Metric Value Card */}
-              <div
-                style={{
-                  background: 'rgba(10,22,40,0.6)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: 14,
-                  padding: '18px',
-                  marginBottom: 16,
-                  display: 'flex',
-                  alignItems: 'baseline',
-                  justifyContent: 'space-between',
-                  flexWrap: 'wrap',
-                  gap: 12,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 4 }}>
-                    Latest Recorded Telemetry
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-                    <span style={{ fontSize: '2.1rem', fontWeight: 800, color: activeIndicator.latest_value ? '#f8fafc' : '#64748b', letterSpacing: '-0.02em' }}>
-                      {activeIndicator.latest_value || 'No Data'}
+              {/* Metric & Value Panel or Empty State */}
+              {activeIndicator.latest_value != null ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Latest Telemetry Card */}
+                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                      Latest Recorded Telemetry
                     </span>
-                    {activeIndicator.latest_unit && (
-                      <span style={{ fontSize: '0.95rem', fontWeight: 600, color: '#94a3b8' }}>
+                    <div className="flex items-baseline gap-1.5 font-mono">
+                      <span className="text-2xl font-extrabold text-white">
+                        {activeIndicator.latest_value}
+                      </span>
+                      <span className="text-xs font-semibold text-slate-400">
                         {activeIndicator.latest_unit}
                       </span>
-                    )}
-                  </div>
-                </div>
+                    </div>
 
-                {activeIndicator.recorded_at && (
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '0.7rem', color: '#64748b' }}>Timestamp</div>
-                    <div style={{ fontSize: '0.8rem', color: '#cbd5e1', fontWeight: 500 }}>
-                      {new Date(activeIndicator.recorded_at).toLocaleDateString(undefined, {
-                        month: 'short',
-                        day: 'numeric',
-                        year: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                      })}
+                    <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-400">
+                      <span className="flex items-center gap-1">
+                        <Clock size={11} className="text-slate-500" />
+                        {activeIndicator.recorded_at
+                          ? format(new Date(activeIndicator.recorded_at), 'MMM d, h:mm a')
+                          : 'Recorded'}
+                      </span>
+                      <span className="text-slate-400 capitalize">
+                        Trend: {activeIndicator.trend.replace('_', ' ')}
+                      </span>
                     </div>
                   </div>
-                )}
-              </div>
 
-              {/* Provenance & Source Badge */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16, flexWrap: 'wrap' }}>
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    padding: '4px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    fontSize: '0.75rem',
-                    color: '#94a3b8',
-                  }}
-                >
-                  <ShieldCheck size={13} color="#38bdf8" />
-                  <span>
-                    Source:{' '}
-                    <strong style={{ color: activeIndicator.is_sample ? '#f59e0b' : '#cbd5e1' }}>
-                      {activeIndicator.is_sample
-                        ? 'DEMO DATA'
-                        : activeIndicator.measurement_source === 'measured_device' || activeIndicator.measurement_source?.includes('ble')
-                        ? 'REAL DEVICE DATA'
-                        : activeIndicator.measurement_source === 'webcam_rppg_experimental'
-                        ? 'WEBCAM EXPERIMENTAL'
-                        : activeIndicator.measurement_source?.startsWith('manual')
-                        ? 'Manual Entry — Not Device Verified'
-                        : activeIndicator.measurement_source || 'Not Recorded'}
-                    </strong>
-                  </span>
+                  {/* Provenance Card */}
+                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 flex flex-col justify-between">
+                    <div>
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                        Measurement Provenance
+                      </span>
+                      <div>
+                        {activeIndicator.is_sample ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                            <FlaskConical size={10} /> DEMO DATA
+                          </span>
+                        ) : activeIndicator.measurement_source?.includes('device') ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                            <ShieldCheck size={10} /> REAL DEVICE DATA
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                            <FileText size={10} /> Manual Entry — Not Device Verified
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <span className="text-[10px] text-slate-500 font-mono">
+                      Attribution: {activeIndicator.measurement_source || 'Manual patient input'}
+                    </span>
+                  </div>
                 </div>
-
-                {activeIndicator.is_sample && (
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: 6,
-                      background: 'rgba(245,158,11,0.15)',
-                      border: '1px solid rgba(245,158,11,0.3)',
-                      color: '#fbbf24',
-                      fontSize: '0.7rem',
-                      fontWeight: 700,
-                    }}
-                  >
-                    DEMO DATA
-                  </span>
-                )}
-
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    padding: '4px 10px',
-                    borderRadius: 8,
-                    background: 'rgba(255,255,255,0.04)',
-                    border: '1px solid rgba(255,255,255,0.08)',
-                    fontSize: '0.75rem',
-                    color: '#94a3b8',
-                  }}
-                >
-                  <span>Readings on File: <strong style={{ color: '#cbd5e1' }}>{activeIndicator.history_count}</strong></span>
+              ) : (
+                /* Empty state for this organ */
+                <div className="p-6 rounded-xl bg-slate-900/50 border border-slate-800 text-center space-y-2.5">
+                  <div className="w-9 h-9 rounded-full bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+                    <Activity size={18} />
+                  </div>
+                  <p className="text-xs font-semibold text-slate-300">
+                    No Telemetry Recorded for {activeIndicator.label}
+                  </p>
+                  <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
+                    Log a measurement using Mode B (Manual Entry) or connect a compatible medical monitor to populate this physiological indicator.
+                  </p>
                 </div>
-              </div>
+              )}
 
-              {/* Clinical Summary & Guidelines */}
-              <div
-                style={{
-                  background: 'rgba(10,22,40,0.5)',
-                  border: '1px solid rgba(255,255,255,0.06)',
-                  borderRadius: 12,
-                  padding: '14px 16px',
-                  marginBottom: 20,
-                }}
-              >
-                <div style={{ fontSize: '0.72rem', color: '#38bdf8', fontWeight: 600, textTransform: 'uppercase', marginBottom: 4 }}>
-                  Clinical Evaluation Summary
-                </div>
-                <p style={{ fontSize: '0.85rem', color: '#e2e8f0', lineHeight: 1.5, margin: 0 }}>
+              {/* Clinical Summary */}
+              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5 text-xs">
+                <span className="font-semibold text-white block">
+                  Guideline Interpretation &amp; Physiological Scope
+                </span>
+                <p className="text-slate-300 leading-relaxed text-[11px]">
                   {activeIndicator.clinical_summary}
                 </p>
               </div>
-
-              {/* Navigation Action Links */}
-              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                {selectedSystem === 'cardiovascular' && (
-                  <Link
-                    to="/patient/vitalsense/blood-pressure"
-                    className="btn-primary"
-                    style={{ textDecoration: 'none', fontSize: '0.825rem', padding: '8px 16px' }}
-                  >
-                    <span>Open Blood Pressure Portal</span>
-                    <ChevronRight size={14} />
-                  </Link>
-                )}
-
-                {selectedSystem === 'metabolic' && (
-                  <Link
-                    to="/patient/vitalsense/blood-glucose"
-                    className="btn-primary"
-                    style={{ textDecoration: 'none', fontSize: '0.825rem', padding: '8px 16px' }}
-                  >
-                    <span>Open Blood Glucose Portal</span>
-                    <ChevronRight size={14} />
-                  </Link>
-                )}
-
-                <Link
-                  to="/patient/vitalsense"
-                  className="btn-secondary"
-                  style={{ textDecoration: 'none', fontSize: '0.825rem', padding: '8px 16px' }}
-                >
-                  <span>Full VitalSense Dashboard</span>
-                </Link>
-
-                {activeIndicator.status === 'urgent' && (
-                  <Link
-                    to="/patient/hospitals"
-                    style={{
-                      background: 'linear-gradient(135deg, #ef4444, #dc2626)',
-                      color: 'white',
-                      fontWeight: 600,
-                      padding: '8px 16px',
-                      borderRadius: 10,
-                      border: 'none',
-                      cursor: 'pointer',
-                      fontSize: '0.825rem',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      textDecoration: 'none',
-                      boxShadow: '0 4px 14px rgba(239,68,68,0.4)',
-                    }}
-                  >
-                    <AlertTriangle size={14} />
-                    <span>Nearby Emergency Care</span>
-                  </Link>
-                )}
-              </div>
             </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '40px 20px', color: '#94a3b8' }}>
-              Select an anatomical hotspot to inspect recorded vitals telemetry.
+            <div className="py-12 text-center text-slate-500 text-xs">
+              Select an anatomical region on the body silhouette to inspect recorded metrics.
             </div>
           )}
+
+          {/* Drawer Footer Actions */}
+          <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <span className="text-slate-500 text-[10px] italic">
+              Organ status evaluated from recorded parameters • Not an optical scan
+            </span>
+
+            {onLogClick && (
+              <button
+                onClick={() => onLogClick(activeIndicator?.measurement_type || 'bp')}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold cursor-pointer transition-colors"
+              >
+                <Plus size={13} />
+                <span>Log {activeIndicator?.label || 'Reading'}</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
     </div>

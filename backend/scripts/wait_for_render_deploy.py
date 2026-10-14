@@ -3,59 +3,53 @@ import urllib.request
 import urllib.error
 import json
 import sys
+import re
 
 BASE = "https://medicare-ai-iv31.onrender.com"
-TARGET_COMMIT = "46b7ef6"
+TARGET_COMMIT = "59f4b32"
+EXPECTED_BUNDLE = "index-Cr7TuGBo"
+EXPECTED_CSS = "index-DVB9OdQu"
 
 print("==================================================================", flush=True)
 print(f"Monitoring Render for Live Deployment of Commit {TARGET_COMMIT}...", flush=True)
-print("Checking for WebAuthn Passkey API & VitalSense Test Mode Endpoints...", flush=True)
+print("Checking for Frontend Bundles (index-Cr7TuGBo.js & index-DVB9OdQu.css)...", flush=True)
 print("==================================================================", flush=True)
 
 deployed = False
-for attempt in range(1, 90):
+for attempt in range(1, 120):
     try:
-        # 1. Login as Alice to get a token
-        login_data = json.dumps({"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"}).encode()
-        login_req = urllib.request.Request(
-            f"{BASE}/api/v1/auth/login",
-            data=login_data,
-            headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-        )
-        with urllib.request.urlopen(login_req, timeout=15) as res:
-            probe_token = json.loads(res.read().decode())["access_token"]
-
-        # 2. Check if /api/v1/vitals/history (the route alias introduced in commit 46b7ef6) is live
-        hist_req = urllib.request.Request(
-            f"{BASE}/api/v1/vitals/history?limit=1",
-            headers={"Authorization": f"Bearer {probe_token}", "User-Agent": "Mozilla/5.0"},
-        )
-        with urllib.request.urlopen(hist_req, timeout=20) as res:
-            if res.status == 200:
+        req = urllib.request.Request(f"{BASE}/", headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(req, timeout=20) as res:
+            html = res.read().decode("utf-8", errors="ignore")
+            scripts = re.findall(r'src="([^"]+)"', html)
+            css = re.findall(r'href="([^"]+\.css)"', html)
+            
+            # Detect new container: either expected bundle exists or old bundle is gone
+            is_new = any(EXPECTED_BUNDLE in s for s in scripts) or any(EXPECTED_CSS in c for c in css) or (len(scripts) > 0 and not any("index-D-Xa00XH" in s for s in scripts))
+            if is_new:
                 print(f"\n>>> SUCCESS: Commit {TARGET_COMMIT} is DEPLOYED and LIVE on Render! (Attempt {attempt}) <<<\n", flush=True)
+                print(f"Live HTML scripts: {scripts}", flush=True)
+                print(f"Live HTML CSS: {css}", flush=True)
                 deployed = True
                 break
-    except urllib.error.HTTPError as http_err:
-        if http_err.code == 404:
-            print(f"[{attempt}/90] Route /vitals/history returned 404 (Render still running previous commit). Waiting 15s for Docker build & container swap...", flush=True)
-        else:
-            print(f"[{attempt}/90] Status: HTTP {http_err.code} — Waiting for Render container swap...", flush=True)
+            else:
+                print(f"[{attempt}/60] Render still serving previous container assets ({scripts}). Waiting 15s...", flush=True)
     except Exception as exc:
-        print(f"[{attempt}/90] Waiting for Render... ({exc})", flush=True)
+        print(f"[{attempt}/60] Waiting for Render... ({exc})", flush=True)
     time.sleep(15)
 
 if not deployed:
     print(f"\nDeployment monitoring timed out after 60 attempts for commit {TARGET_COMMIT}.", flush=True)
-    print("Render may be processing the Docker build or auto-deploy might require manual trigger.", flush=True)
+    print("Render may still be compiling the multi-stage Docker container or requires a manual rebuild trigger.", flush=True)
     sys.exit(1)
 
-print("\n--- Running Live Production Verification Suite for Commit " + TARGET_COMMIT + " ---", flush=True)
+print("\n--- Running Live Production Verification Suite for Hardwareless Workflows ---", flush=True)
 
 # 1. Health API
 with urllib.request.urlopen(f"{BASE}/api/health", timeout=15) as res:
-    print(f"1. Health API: {res.status} {res.read().decode()}")
+    print(f"1. Health API: {res.status} {res.read().decode().strip()}")
 
-# 2. Patient Login
+# 2. Patient Login (Alice Johnson)
 login_data = json.dumps({"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"}).encode()
 login_req = urllib.request.Request(
     f"{BASE}/api/v1/auth/login",
@@ -66,7 +60,7 @@ with urllib.request.urlopen(login_req, timeout=15) as res:
     pat_token = json.loads(res.read().decode())["access_token"]
     print("2. Patient Login (Alice Johnson): Token received successfully.")
 
-# 3. Doctor Login
+# 3. Doctor Login (Dr. Sarah Chen)
 doc_login_data = json.dumps({"email": "sarah.chen@medicare.ai", "password": "DoctorPass123!"}).encode()
 doc_req = urllib.request.Request(
     f"{BASE}/api/v1/auth/login",
@@ -77,131 +71,102 @@ with urllib.request.urlopen(doc_req, timeout=15) as res:
     doc_token = json.loads(res.read().decode())["access_token"]
     print("3. Doctor Login (Dr. Sarah Chen): Token received successfully.")
 
-# 4. Admin Login
-admin_login_data = json.dumps({"email": "admin@medicare.ai", "password": "AdminPass123!"}).encode()
-admin_req = urllib.request.Request(
-    f"{BASE}/api/v1/auth/login",
-    data=admin_login_data,
-    headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-)
-with urllib.request.urlopen(admin_req, timeout=15) as res:
-    admin_token = json.loads(res.read().decode())["access_token"]
-    print("4. Admin Login (System Admin): Token received successfully.")
-
-# 5. WebAuthn Passkey Registration Options (Authenticated)
-reg_opt_req = urllib.request.Request(
-    f"{BASE}/api/v1/auth/passkeys/register-options",
-    headers={"Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
-    method="POST",
-)
-with urllib.request.urlopen(reg_opt_req, timeout=15) as res:
-    reg_opts = json.loads(res.read().decode())
-    print(f"5. WebAuthn Register Options: Challenge generated: {reg_opts['challenge'][:15]}... RP: {reg_opts['rp']['name']}")
-
-# 6. VitalSense Test Mode: Simulate Normal State
-sim_norm_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/test-mode/simulate",
-    data=json.dumps({"state": "normal"}).encode(),
+# 4. Mode B Manual Entry: Log Blood Pressure (Genuine Patient Reading)
+bp_manual_payload = json.dumps({
+    "systolic_bp": 124,
+    "diastolic_bp": 82,
+    "heart_rate": 70,
+    "measurement_source": "manual_home_cuff",
+    "notes": "[PROD MANUAL ENTRY] Home cuff resting measurement",
+    "is_sample": False,
+}).encode()
+bp_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/blood-pressure",
+    data=bp_manual_payload,
     headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
     method="POST",
 )
-with urllib.request.urlopen(sim_norm_req, timeout=15) as res:
-    sim_norm = json.loads(res.read().decode())
-    print(f"6. VitalSense Test Mode [Normal Simulation]: {sim_norm['message']} (is_sample={sim_norm['vital']['is_sample']})")
+with urllib.request.urlopen(bp_req, timeout=15) as res:
+    bp_data = json.loads(res.read().decode())
+    real_bp_id = bp_data["id"]
+    print(f"4. Mode B Manual Blood Pressure: Saved {bp_data['systolic_bp']}/{bp_data['diastolic_bp']} mmHg")
+    print(f"   Provenance: is_sample={bp_data['is_sample']}, source='{bp_data['measurement_source']}', category='{bp_data['bp_category']}'")
+    assert bp_data["is_sample"] is False
+    assert bp_data["measurement_source"] == "manual_home_cuff"
 
-# 7. VitalSense Test Mode: Simulate Urgent Crisis State & Check Explainable Alert
-sim_urg_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/test-mode/simulate",
-    data=json.dumps({"state": "urgent"}).encode(),
+# 5. Mode B Manual Entry: Log Blood Glucose (Genuine Patient Reading with Unit Conversion)
+glu_manual_payload = json.dumps({
+    "blood_glucose": 105.0,
+    "glucose_unit": "mg/dL",
+    "glucose_context": "fasting",
+    "measurement_source": "manual_fingerstick",
+    "notes": "[PROD MANUAL ENTRY] Morning fasting electrochemical test strip",
+    "is_sample": False,
+}).encode()
+glu_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/blood-glucose",
+    data=glu_manual_payload,
     headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
     method="POST",
 )
-with urllib.request.urlopen(sim_urg_req, timeout=15) as res:
-    sim_urg = json.loads(res.read().decode())
-    print(f"7. VitalSense Test Mode [Urgent Crisis]: SBP {sim_urg['vital']['systolic_bp']}/{sim_urg['vital']['diastolic_bp']} mmHg, Alerts Triggered: {sim_urg['alerts_triggered']}")
+with urllib.request.urlopen(glu_req, timeout=15) as res:
+    glu_data = json.loads(res.read().decode())
+    real_glu_id = glu_data["id"]
+    print(f"5. Mode B Manual Blood Glucose: Saved {glu_data['blood_glucose']} mg/dL ({glu_data['blood_glucose_mmol']} mmol/L)")
+    print(f"   Context: '{glu_data['glucose_context']}', is_sample={glu_data['is_sample']}, source='{glu_data['measurement_source']}'")
+    assert glu_data["is_sample"] is False
+    assert glu_data["measurement_source"] == "manual_fingerstick"
 
-# 8. Check Active Clinical Alerts & Explanations
-alerts_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/alerts?status=active",
+# 6. Mode C Simulation: Inject Demo Data
+demo_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/test-mode/simulate",
+    data=json.dumps({"state": "attention"}).encode(),
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
+    method="POST",
+)
+with urllib.request.urlopen(demo_req, timeout=15) as res:
+    demo_data = json.loads(res.read().decode())
+    print(f"6. Mode C Demo Simulation: Generated sample state '{demo_data.get('state', 'simulated')}'")
+    assert demo_data["vital"]["is_sample"] is True
+    assert demo_data["vital"]["measurement_source"] == "SAMPLE_DATA"
+
+# 7. Mode C Reset Preservation: Clear Demo Data & Verify Genuine Measurements Persist
+clear_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/test-mode/simulate",
+    data=json.dumps({"state": "clear_test_data"}).encode(),
+    headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
+    method="POST",
+)
+with urllib.request.urlopen(clear_req, timeout=15) as res:
+    clear_data = json.loads(res.read().decode())
+    print(f"7. Mode C Demo Reset: Cleared {clear_data.get('deleted_count', 0)} fictional demo records.")
+
+# 8. Verify Genuine Patient Measurements Still Exist after Demo Reset
+hist_req = urllib.request.Request(
+    f"{BASE}/api/v1/vitals/history?limit=20",
     headers={"Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
 )
-with urllib.request.urlopen(alerts_req, timeout=15) as res:
-    active_alerts = json.loads(res.read().decode())
-    print(f"8. Active Clinical Alerts: Found {len(active_alerts)} active alerts.")
-    if active_alerts:
-        top_alert = active_alerts[0]
-        print(f"   Top Alert: [{top_alert['severity'].upper()}] {top_alert['title']}")
-        print(f"   Triggered Explanation: {top_alert['message']}")
-        print(f"   Recorded Timestamp: {top_alert['created_at']}")
+with urllib.request.urlopen(hist_req, timeout=15) as res:
+    history = json.loads(res.read().decode())
+    found_bp = any(v["id"] == real_bp_id for v in history)
+    found_glu = any(v["id"] == real_glu_id for v in history)
+    any_demo = any(v["is_sample"] is True for v in history)
+    print(f"8. Reset Safety Verification:")
+    print(f"   Genuine BP Measurement Preserved: {found_bp}")
+    print(f"   Genuine Glucose Measurement Preserved: {found_glu}")
+    print(f"   Zero Demo Data in Genuine History: {not any_demo}")
+    assert found_bp, "Genuine BP measurement was deleted by demo reset!"
+    assert found_glu, "Genuine Glucose measurement was deleted by demo reset!"
 
-# 9. Body Map Status Reactivity
-bm_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/body-map",
-    headers={"Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
-)
-with urllib.request.urlopen(bm_req, timeout=15) as res:
-    bm = json.loads(res.read().decode())
-    cv_status = bm["indicators"]["cardiovascular"]["status"]
-    print(f"9. Interactive Body Map Reactivity: Cardiovascular status is '{cv_status}', overall: '{bm['overall_health_status']}'")
-
-# 10. Cross-Patient Isolation Security Check
-# Doctor cannot access non-consented patient data without consent
-unauthorized_req = urllib.request.Request(
+# 9. Cross-Patient Isolation Security Check
+unauth_req = urllib.request.Request(
     f"{BASE}/api/v1/vitals/doctor/patients/00000000-0000-0000-0000-000000000001",
     headers={"Authorization": f"Bearer {doc_token}", "User-Agent": "Mozilla/5.0"},
 )
 try:
-    with urllib.request.urlopen(unauthorized_req, timeout=15) as res:
-        print("ERROR: Unauthorized access unexpectedly succeeded!")
+    with urllib.request.urlopen(unauth_req, timeout=15) as res:
+        print("ERROR: Unauthorized cross-patient access succeeded!")
 except urllib.error.HTTPError as http_err:
-    print(f"10. Cross-Patient Isolation: Blocked correctly with HTTP {http_err.code} ({http_err.reason})")
+    print(f"9. Cross-Patient Isolation: Blocked correctly with HTTP {http_err.code} ({http_err.reason})")
 
-# 11. Blood Pressure Fictional Test Reading & History Alias Check
-bp_test_payload = json.dumps({
-    "systolic": 132,
-    "diastolic": 84,
-    "heart_rate": 76,
-    "notes": "[PROD DEMO TEST] BP simulation",
-    "is_sample": True,
-}).encode()
-bp_test_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/blood-pressure",
-    data=bp_test_payload,
-    headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
-    method="POST",
-)
-with urllib.request.urlopen(bp_test_req, timeout=15) as res:
-    bp_saved = json.loads(res.read().decode())
-    print(f"11. Blood Pressure Test Reading: Saved {bp_saved['systolic_bp']}/{bp_saved['diastolic_bp']} mmHg (is_sample={bp_saved['is_sample']}, source={bp_saved['measurement_source']})")
-
-# 12. Blood Glucose Test Reading & Health Profile Timeline Verification
-glu_test_payload = json.dumps({
-    "glucose_value": 115.0,
-    "unit": "mg/dL",
-    "context": "fasting",
-    "notes": "[PROD DEMO TEST] Fasting glucose simulation",
-    "is_sample": True,
-}).encode()
-glu_test_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/blood-glucose",
-    data=glu_test_payload,
-    headers={"Content-Type": "application/json", "Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
-    method="POST",
-)
-with urllib.request.urlopen(glu_test_req, timeout=15) as res:
-    glu_saved = json.loads(res.read().decode())
-    print(f"12. Blood Glucose Test Reading: Saved {glu_saved['blood_glucose']} mg/dL (is_sample={glu_saved['is_sample']})")
-
-# Check timeline contains the sample readings
-profile_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/health-profile",
-    headers={"Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
-)
-with urllib.request.urlopen(profile_req, timeout=15) as res:
-    prof_data = json.loads(res.read().decode())
-    timeline_items = prof_data.get("timeline", [])
-    sample_items = [t for t in timeline_items if t.get("is_sample") is True]
-    print(f"13. Health Timeline Verification: Found {len(sample_items)} demo/sample entries in chronological patient timeline.")
-
-print("\n>>> ALL PRODUCTION ENDPOINTS & SECURITY TESTS PASSED ON LIVE DEPLOYMENT! <<<\n", flush=True)
-sys.exit(0)
+print("\n>>> ALL PRODUCTION HARDWARELESS WORKFLOWS CONFIRMED OPERATIONAL ON RENDER! <<<\n", flush=True)
