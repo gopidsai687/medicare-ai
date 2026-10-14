@@ -13,30 +13,35 @@ print("Checking for WebAuthn Passkey API & VitalSense Test Mode Endpoints...", f
 print("==================================================================", flush=True)
 
 deployed = False
-for attempt in range(1, 60):
+for attempt in range(1, 90):
     try:
-        # Check if the new Passkey login-options endpoint is active (unauthenticated endpoint unique to this commit)
-        passkey_req = urllib.request.Request(
-            f"{BASE}/api/v1/auth/passkeys/login-options",
-            data=json.dumps({"email": "alice.johnson@medicare.ai"}).encode(),
+        # 1. Login as Alice to get a token
+        login_data = json.dumps({"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"}).encode()
+        login_req = urllib.request.Request(
+            f"{BASE}/api/v1/auth/login",
+            data=login_data,
             headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"},
-            method="POST",
         )
-        with urllib.request.urlopen(passkey_req, timeout=20) as res:
+        with urllib.request.urlopen(login_req, timeout=15) as res:
+            probe_token = json.loads(res.read().decode())["access_token"]
+
+        # 2. Check if /api/v1/vitals/history (the route alias introduced in commit 46b7ef6) is live
+        hist_req = urllib.request.Request(
+            f"{BASE}/api/v1/vitals/history?limit=1",
+            headers={"Authorization": f"Bearer {probe_token}", "User-Agent": "Mozilla/5.0"},
+        )
+        with urllib.request.urlopen(hist_req, timeout=20) as res:
             if res.status == 200:
-                body = json.loads(res.read().decode())
-                if "challenge" in body:
-                    print(f"\n>>> SUCCESS: Commit {TARGET_COMMIT} is DEPLOYED and LIVE on Render! (Attempt {attempt}) <<<\n", flush=True)
-                    print(f"Passkey Challenge received: {body['challenge'][:15]}... RP ID: {body['rpId']}", flush=True)
-                    deployed = True
-                    break
+                print(f"\n>>> SUCCESS: Commit {TARGET_COMMIT} is DEPLOYED and LIVE on Render! (Attempt {attempt}) <<<\n", flush=True)
+                deployed = True
+                break
     except urllib.error.HTTPError as http_err:
         if http_err.code == 404:
-            print(f"[{attempt}/60] Endpoint /passkeys/login-options returned 404 (previous commit still serving). Waiting 15s for Render build...", flush=True)
+            print(f"[{attempt}/90] Route /vitals/history returned 404 (Render still running previous commit). Waiting 15s for Docker build & container swap...", flush=True)
         else:
-            print(f"[{attempt}/60] Status: HTTP {http_err.code} — Waiting for Render container swap...", flush=True)
+            print(f"[{attempt}/90] Status: HTTP {http_err.code} — Waiting for Render container swap...", flush=True)
     except Exception as exc:
-        print(f"[{attempt}/60] Waiting for Render... ({exc})", flush=True)
+        print(f"[{attempt}/90] Waiting for Render... ({exc})", flush=True)
     time.sleep(15)
 
 if not deployed:
