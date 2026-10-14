@@ -396,3 +396,24 @@ body {
 .role-doctor  { color: #57a3f9; }
 .role-admin   { color: #fbbf24; }
 .role-nurse   { color: #34d399; }
+
+/* ── Mobile Responsiveness & Bottom Navigation ────────────────────────────── */
+@media (max-width: 768px) {
+  .sidebar {
+    display: none !important;
+  }
+  .page-content {
+    margin-left: 0 !important;
+    padding-bottom: 70px !important;
+  }
+  .page-body {
+    padding: 16px 14px !important;
+  }
+  .topbar {
+    padding: 0 16px !important;
+  }
+  .mobile-bottom-nav {
+    display: flex !important;
+  }
+}
+

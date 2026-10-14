@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#071120" />
+      <stop offset="50%" stop-color="#0a192f" />
+      <stop offset="100%" stop-color="#0c2340" />
+    </linearGradient>
+
+    <!-- Pulse & Heart Gradient (Blue to Teal) -->
+    <linearGradient id="medicareGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" />
+      <stop offset="35%" stop-color="#0ea5e9" />
+      <stop offset="70%" stop-color="#14b8a6" />
+      <stop offset="100%" stop-color="#2dd4bf" />
+    </linearGradient>
+
+    <!-- Soft Ambient Glow -->
+    <filter id="glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="12" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Container Base -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+  <rect width="504" height="504" x="4" y="4" rx="108" fill="none" stroke="url(#medicareGrad)" stroke-width="3" stroke-opacity="0.3" />
+
+  <!-- Heart Silhouette Frame -->
+  <path d="M256,430 C256,430 80,315 80,195 C80,125 135,78 200,78 C232,78 248,94 256,108 C264,94 280,78 312,78 C377,78 432,125 432,195 C432,315 256,430 256,430 Z"
+        fill="#0d2442"
+        fill-opacity="0.45"
+        stroke="url(#medicareGrad)"
+        stroke-width="12"
+        stroke-linejoin="round"
+        stroke-linecap="round"
+        stroke-opacity="0.85" />
+
+  <!-- ECG / Pulse Line traversing through center -->
+  <path d="M72,256 L152,256 L174,236 L192,256 L210,290 L248,118 L284,374 L318,242 L342,274 L358,256 L440,256"
+        fill="none"
+        stroke="url(#medicareGrad)"
+        stroke-width="18"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        filter="url(#glow)" />
+
+  <!-- Pulse Peak Highlight Dot -->
+  <circle cx="248" cy="118" r="8" fill="#ffffff" filter="url(#glow)" />
+</svg>

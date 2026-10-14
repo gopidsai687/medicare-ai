@@ -26,6 +26,10 @@ from app.models.vital_sign import (
     VitalReminder,
     VitalSharingConsent,
     WebAuthnCredential,
+    VitalAlert,
+    AlertSeverity,
+    AlertStatus,
+    NotificationPreference,
 )
 from app.models.encounter import Encounter, EncounterType, EncounterStatus
 from app.models.audit_log import AuditLog, AuditAction, AuditSeverity
@@ -120,6 +124,10 @@ __all__ = [
     "VitalReminder",
     "VitalSharingConsent",
     "WebAuthnCredential",
+    "VitalAlert",
+    "AlertSeverity",
+    "AlertStatus",
+    "NotificationPreference",
     "Encounter",
     "EncounterType",
     "EncounterStatus",

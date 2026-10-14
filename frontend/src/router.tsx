@@ -18,12 +18,17 @@ const PatientPrescriptionAnalysis = lazy(() => import('@/pages/patient/Prescript
 const PatientMedicalReportAnalysis = lazy(() => import('@/pages/patient/MedicalReportAnalysis'))
 const PatientPreviousAnalyses = lazy(() => import('@/pages/patient/PreviousAnalyses'))
 const PatientVitalSense = lazy(() => import('@/pages/patient/VitalSense'))
+const PatientBloodPressure = lazy(() => import('@/pages/patient/BloodPressureTracking'))
+const PatientBloodGlucose = lazy(() => import('@/pages/patient/BloodGlucoseTracking'))
+const PatientNearbyHospitals = lazy(() => import('@/pages/patient/NearbyHospitals'))
+const PatientHealthProfile = lazy(() => import('@/pages/patient/PatientHealthProfile'))
 const PatientPPGResearch = lazy(() => import('@/pages/patient/PPGResearch'))
 const PatientSettings = lazy(() => import('@/pages/patient/Settings'))
 
 // Doctor
 const DoctorDashboard = lazy(() => import('@/pages/doctor/Dashboard'))
 const DoctorVitalSenseClinical = lazy(() => import('@/pages/doctor/VitalSenseClinical'))
+const DoctorAlertQueue = lazy(() => import('@/pages/doctor/DoctorAlertQueue'))
 const DoctorPatients = lazy(() => import('@/pages/doctor/MyPatients'))
 const DoctorSchedule = lazy(() => import('@/pages/doctor/Schedule'))
 const DoctorEncounters = lazy(() => import('@/pages/doctor/Encounters'))
@@ -79,6 +84,10 @@ export const router = createBrowserRouter([
           { path: '/patient/reports', element: withSuspense(PatientMedicalReportAnalysis) },
           { path: '/patient/analyses', element: withSuspense(PatientPreviousAnalyses) },
           { path: '/patient/vitalsense', element: withSuspense(PatientVitalSense) },
+          { path: '/patient/vitalsense/blood-pressure', element: withSuspense(PatientBloodPressure) },
+          { path: '/patient/vitalsense/blood-glucose', element: withSuspense(PatientBloodGlucose) },
+          { path: '/patient/hospitals', element: withSuspense(PatientNearbyHospitals) },
+          { path: '/patient/profile', element: withSuspense(PatientHealthProfile) },
           { path: '/patient/vitalsense/research', element: withSuspense(PatientPPGResearch) },
           { path: '/patient/settings', element: withSuspense(PatientSettings) },
         ],
@@ -95,6 +104,7 @@ export const router = createBrowserRouter([
         children: [
           { path: '/doctor', element: withSuspense(DoctorDashboard) },
           { path: '/doctor/vitalsense', element: withSuspense(DoctorVitalSenseClinical) },
+          { path: '/doctor/alerts', element: withSuspense(DoctorAlertQueue) },
           { path: '/doctor/patients', element: withSuspense(DoctorPatients) },
           { path: '/doctor/schedule', element: withSuspense(DoctorSchedule) },
           { path: '/doctor/encounters', element: withSuspense(DoctorEncounters) },

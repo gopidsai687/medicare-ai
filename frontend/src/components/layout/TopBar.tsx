@@ -1,17 +1,26 @@
+import { useState } from 'react'
 import { Bell, Search, ChevronRight } from 'lucide-react'
 import { useLocation } from 'react-router-dom'
 import { useAuth } from '@/lib/auth'
 import { getRoleLabel } from '@/lib/utils'
+import { NotificationCenter } from '@/components/notifications/NotificationCenter'
 
 function getBreadcrumb(pathname: string): string[] {
   const map: Record<string, string> = {
     '/patient': 'Dashboard',
+    '/patient/vitalsense': 'MediCare VitalSense',
+    '/patient/vitalsense/blood-pressure': 'Blood Pressure',
+    '/patient/vitalsense/blood-glucose': 'Blood Glucose',
+    '/patient/hospitals': 'Emergency & Hospitals',
+    '/patient/profile': 'Health Timeline',
     '/patient/appointments': 'Appointments',
     '/patient/records': 'Medical Records',
     '/patient/medications': 'Medications',
     '/patient/labs': 'Lab Results',
     '/patient/ai': 'AI Assistant',
     '/doctor': 'Dashboard',
+    '/doctor/vitalsense': 'VitalSense Clinical',
+    '/doctor/alerts': 'Clinical Alerts Queue',
     '/doctor/patients': 'My Patients',
     '/doctor/schedule': 'Schedule',
     '/doctor/encounters': 'Encounters',
@@ -32,6 +41,8 @@ export function TopBar() {
   const { user } = useAuth()
   const location = useLocation()
   const breadcrumbs = getBreadcrumb(location.pathname)
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [unreadCount, setUnreadCount] = useState(0)
 
   return (
     <header className="topbar">
@@ -70,17 +81,33 @@ export function TopBar() {
       </div>
 
       {/* Notifications */}
-      <button style={{
-        width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(15,32,64,0.6)', display: 'flex', alignItems: 'center',
-        justifyContent: 'center', cursor: 'pointer', position: 'relative', marginLeft: 8,
-        color: '#5a7a9e',
-      }}>
+      <button
+        onClick={() => setIsNotificationsOpen(!isNotificationsOpen)}
+        title="Notifications & Health Alerts"
+        style={{
+          width: 36, height: 36, borderRadius: 10, border: '1px solid rgba(255,255,255,0.08)',
+          background: isNotificationsOpen ? 'rgba(56,189,248,0.2)' : 'rgba(15,32,64,0.6)',
+          display: 'flex', alignItems: 'center',
+          justifyContent: 'center', cursor: 'pointer', position: 'relative', marginLeft: 8,
+          color: isNotificationsOpen ? '#38bdf8' : '#5a7a9e',
+        }}
+      >
         <Bell size={16} />
-        <span style={{
-          position: 'absolute', top: 6, right: 6, width: 7, height: 7,
-          background: '#3182f4', borderRadius: '50%', border: '1.5px solid #0a1628',
-        }} />
+        {unreadCount > 0 ? (
+          <span style={{
+            position: 'absolute', top: -4, right: -4, minWidth: 16, height: 16,
+            background: '#ef4444', color: 'white', borderRadius: 8,
+            fontSize: '0.65rem', fontWeight: 800, display: 'flex', alignItems: 'center',
+            justifyContent: 'center', padding: '0 3px', border: '2px solid #0a1628',
+          }}>
+            {unreadCount}
+          </span>
+        ) : (
+          <span style={{
+            position: 'absolute', top: 6, right: 6, width: 7, height: 7,
+            background: '#3182f4', borderRadius: '50%', border: '1.5px solid #0a1628',
+          }} />
+        )}
       </button>
 
       {/* Role badge */}
@@ -93,6 +120,13 @@ export function TopBar() {
           {getRoleLabel(user.role)}
         </div>
       )}
+
+      {/* In-App Notification Center Popover */}
+      <NotificationCenter
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        onAlertCountChange={setUnreadCount}
+      />
     </header>
   )
 }

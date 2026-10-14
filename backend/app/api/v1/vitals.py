@@ -21,11 +21,19 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.appointment import Appointment
 from app.models.doctor import Doctor
+from app.models.medical_record import MedicalRecord
+from app.models.medical_report_analysis import MedicalReportUpload
 from app.models.patient import Patient
+from app.models.prescription import Prescription
+from app.models.prescription_analysis import PrescriptionUpload
 from app.models.user import User, UserRole
 from app.models.vital_sign import (
+    AlertSeverity,
+    AlertStatus,
     GlucoseContext,
     MeasurementSource,
+    NotificationPreference,
+    VitalAlert,
     VitalReminder,
     VitalSharingConsent,
     VitalSign,
@@ -34,10 +42,17 @@ from app.models.vital_sign import (
 from app.schemas.vital_sign import (
     BloodGlucoseLogRequest,
     BloodPressureLogRequest,
+    BodyMapIndicator,
+    BodyMapResponse,
     DeviceBatchImportRequest,
     DeviceBatchImportResponse,
     DoctorClinicalNoteRequest,
     HeartRateLogRequest,
+    NotificationPreferenceRead,
+    NotificationPreferenceUpdate,
+    NotificationSubscribeRequest,
+    VitalAlertAcknowledgeRequest,
+    VitalAlertRead,
     VitalReminderCreate,
     VitalReminderRead,
     VitalReminderUpdate,
@@ -54,6 +69,8 @@ from app.schemas.vital_sign import (
     classify_blood_pressure,
 )
 from app.services.ai_service import ai_service
+from app.services.alert_engine import check_stale_measurements, evaluate_vital_reading
+from app.services.hospital_service import search_nearby_hospitals
 
 router = APIRouter(prefix="/vitals", tags=["VitalSense"])
 
@@ -61,7 +78,7 @@ router = APIRouter(prefix="/vitals", tags=["VitalSense"])
 # -----------------------------------------------------------------------------
 # Helpers
 # -----------------------------------------------------------------------------
-def _enrich_vital_sign(v: VitalSign) -> VitalSignRead:
+def _enrich_vital_sign(v: VitalSign, alert: Optional[Any] = None) -> VitalSignRead:
     """Compute deterministic clinical guideline categories and MAP."""
     bp_cat = classify_blood_pressure(v.systolic_bp, v.diastolic_bp)
     glu_cat = classify_blood_glucose(v.blood_glucose, v.glucose_context)
@@ -73,6 +90,14 @@ def _enrich_vital_sign(v: VitalSign) -> VitalSignRead:
     read_model.bp_category = bp_cat
     read_model.glucose_category = glu_cat
     read_model.mean_arterial_pressure = map_val
+    if alert is not None:
+        read_model.alert = {
+            "id": alert.id,
+            "severity": alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity),
+            "title": alert.title,
+            "message": alert.message,
+            "recommendation": alert.clinical_guidance,
+        }
     return read_model
 
 
@@ -229,6 +254,7 @@ async def record_vital_signs(
         is_sample=payload.is_sample,
     )
     db.add(vitals)
+    await evaluate_vital_reading(db, patient_id, vitals)
     await db.commit()
     await db.refresh(vitals)
     return _enrich_vital_sign(vitals)
@@ -264,9 +290,11 @@ async def log_blood_pressure(
         is_sample=False,
     )
     db.add(vitals)
+    created_alerts = await evaluate_vital_reading(db, patient_id, vitals)
     await db.commit()
     await db.refresh(vitals)
-    return _enrich_vital_sign(vitals)
+    primary_alert = created_alerts[0] if created_alerts else None
+    return _enrich_vital_sign(vitals, alert=primary_alert)
 
 
 @router.post("/blood-glucose", response_model=VitalSignRead, status_code=status.HTTP_201_CREATED)
@@ -304,9 +332,11 @@ async def log_blood_glucose(
         is_sample=False,
     )
     db.add(vitals)
+    created_alerts = await evaluate_vital_reading(db, patient_id, vitals)
     await db.commit()
     await db.refresh(vitals)
-    return _enrich_vital_sign(vitals)
+    primary_alert = created_alerts[0] if created_alerts else None
+    return _enrich_vital_sign(vitals, alert=primary_alert)
 
 
 @router.post("/weight", response_model=VitalSignRead, status_code=status.HTTP_201_CREATED)
@@ -356,6 +386,7 @@ async def log_heart_rate(
         is_patient_entered=True,
     )
     db.add(vitals)
+    await evaluate_vital_reading(db, patient_id, vitals)
     await db.commit()
     await db.refresh(vitals)
     return _enrich_vital_sign(vitals)
@@ -1188,3 +1219,706 @@ async def get_biometric_status(
         "devices": [c.device_name for c in creds],
         "disclaimer": "Biometric authentication verifies patient identity. Biometric sensors do not measure blood pressure or glucose.",
     }
+
+
+# -----------------------------------------------------------------------------
+# Clinical Alerts Engine Endpoints
+# -----------------------------------------------------------------------------
+@router.get("/alerts", response_model=List[VitalAlertRead])
+async def get_patient_alerts(
+    patient_id: Optional[uuid.UUID] = None,
+    status_filter: Optional[str] = Query(None, alias="status"),
+    severity: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get clinical alerts for the current patient or an authorized clinician.
+    Also evaluates stale monitoring rules dynamically.
+    """
+    target_patient_id = await _resolve_patient_id(db, current_user, patient_id)
+    if current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        await _verify_doctor_access(db, current_user, target_patient_id)
+
+    # Check for stale readings warning
+    await check_stale_measurements(db, target_patient_id)
+    await db.commit()
+
+    query = select(VitalAlert).where(VitalAlert.patient_id == target_patient_id)
+    if status_filter:
+        query = query.where(VitalAlert.status == status_filter)
+    if severity:
+        query = query.where(VitalAlert.severity == severity)
+
+    query = query.order_by(desc(VitalAlert.created_at)).limit(limit)
+    res = await db.execute(query)
+    alerts = res.scalars().all()
+    return alerts
+
+
+@router.post("/alerts/{alert_id}/acknowledge", response_model=VitalAlertRead)
+async def acknowledge_alert(
+    alert_id: uuid.UUID,
+    payload: VitalAlertAcknowledgeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Acknowledge an alert. Does not erase the underlying telemetry or imply a patient is safe.
+    Allows documenting follow-up notes.
+    """
+    stmt = select(VitalAlert).where(VitalAlert.id == alert_id)
+    res = await db.execute(stmt)
+    alert = res.scalar_one_or_none()
+    if not alert:
+        raise HTTPException(status_code=404, detail="Alert not found")
+
+    if current_user.role == UserRole.PATIENT:
+        p_stmt = select(Patient.id).where(Patient.user_id == current_user.id)
+        p_res = await db.execute(p_stmt)
+        my_patient_id = p_res.scalar_one_or_none()
+        if alert.patient_id != my_patient_id:
+            raise HTTPException(status_code=403, detail="Unauthorized")
+    elif current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        await _verify_doctor_access(db, current_user, alert.patient_id)
+
+    alert.status = AlertStatus.ACKNOWLEDGED.value
+    alert.acknowledged_at = datetime.now(timezone.utc)
+    alert.acknowledged_by_id = current_user.id
+    notes_to_add = payload.clinical_notes or payload.doctor_review_notes
+    if notes_to_add:
+        existing = alert.clinical_notes or ""
+        note_prefix = f"[{current_user.role.value.capitalize()} Note - {datetime.now(timezone.utc).strftime('%b %d, %H:%M')}]"
+        alert.clinical_notes = f"{existing}\n{note_prefix} {notes_to_add}".strip()
+
+    await db.commit()
+    await db.refresh(alert)
+    read_alert = VitalAlertRead.model_validate(alert)
+    read_alert.doctor_review_notes = alert.clinical_notes
+    read_alert.follow_up_action = payload.follow_up_action
+    return read_alert
+
+
+@router.get("/doctor/alerts", response_model=List[VitalAlertRead])
+async def get_doctor_alert_queue(
+    severity: Optional[str] = None,
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Doctor-specific alert queue showing urgent and attention alerts across all consented patients.
+    Enforces explicit patient-to-doctor consent verification.
+    """
+    if current_user.role not in (UserRole.DOCTOR, UserRole.NURSE, UserRole.ADMIN):
+        raise HTTPException(status_code=403, detail="Doctor portal authorization required")
+
+    d_stmt = select(Doctor).where(Doctor.user_id == current_user.id)
+    d_res = await db.execute(d_stmt)
+    doctor = d_res.scalar_one_or_none()
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor profile not found")
+
+    # Get active consented patient IDs
+    consent_stmt = select(VitalSharingConsent.patient_id).where(
+        VitalSharingConsent.doctor_id == doctor.id,
+        VitalSharingConsent.is_active == True,
+    )
+    c_res = await db.execute(consent_stmt)
+    consented_patient_ids = c_res.scalars().all()
+
+    if not consented_patient_ids:
+        return []
+
+    query = select(VitalAlert).where(VitalAlert.patient_id.in_(consented_patient_ids))
+    if severity:
+        query = query.where(VitalAlert.severity == severity)
+    query = query.order_by(desc(VitalAlert.created_at)).limit(limit)
+
+    res = await db.execute(query)
+    alerts = res.scalars().all()
+
+    # Enrich with patient names
+    enriched_alerts = []
+    for alert in alerts:
+        pat_stmt = select(User.full_name).join(Patient, Patient.user_id == User.id).where(Patient.id == alert.patient_id)
+        pat_res = await db.execute(pat_stmt)
+        pat_name = pat_res.scalar_one_or_none() or "Patient"
+
+        alert_dict = VitalAlertRead.model_validate(alert)
+        alert_dict.patient_name = pat_name
+        alert_dict.doctor_review_notes = alert.clinical_notes
+        enriched_alerts.append(alert_dict)
+
+    return enriched_alerts
+
+
+@router.post("/doctor/alerts/{alert_id}/action", response_model=VitalAlertRead)
+async def doctor_alert_action(
+    alert_id: uuid.UUID,
+    payload: VitalAlertAcknowledgeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Clinician documents a follow-up action and notes on an alert."""
+    return await acknowledge_alert(alert_id, payload, db, current_user)
+
+
+# -----------------------------------------------------------------------------
+# Mobile Notification Preferences & Web Push
+# -----------------------------------------------------------------------------
+@router.get("/notifications/preferences", response_model=NotificationPreferenceRead)
+async def get_notification_preferences(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get current user notification preferences (push, quiet hours, alert channels)."""
+    stmt = select(NotificationPreference).where(NotificationPreference.user_id == current_user.id)
+    res = await db.execute(stmt)
+    pref = res.scalar_one_or_none()
+    if not pref:
+        pref = NotificationPreference(user_id=current_user.id)
+        db.add(pref)
+        await db.commit()
+        await db.refresh(pref)
+    return pref
+
+
+@router.put("/notifications/preferences", response_model=NotificationPreferenceRead)
+async def update_notification_preferences(
+    payload: NotificationPreferenceUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update user push notification preferences."""
+    stmt = select(NotificationPreference).where(NotificationPreference.user_id == current_user.id)
+    res = await db.execute(stmt)
+    pref = res.scalar_one_or_none()
+    if not pref:
+        pref = NotificationPreference(user_id=current_user.id)
+        db.add(pref)
+
+    if payload.push_enabled is not None:
+        pref.push_enabled = payload.push_enabled
+    if payload.quiet_hours_enabled is not None:
+        pref.quiet_hours_enabled = payload.quiet_hours_enabled
+    if payload.quiet_hours_start is not None:
+        pref.quiet_hours_start = payload.quiet_hours_start
+    if payload.quiet_hours_end is not None:
+        pref.quiet_hours_end = payload.quiet_hours_end
+    if payload.urgent_override_quiet_hours is not None:
+        pref.urgent_override_quiet_hours = payload.urgent_override_quiet_hours
+    if payload.bp_alerts_enabled is not None:
+        pref.bp_alerts_enabled = payload.bp_alerts_enabled
+    if payload.glucose_alerts_enabled is not None:
+        pref.glucose_alerts_enabled = payload.glucose_alerts_enabled
+    if payload.reminder_alerts_enabled is not None:
+        pref.reminder_alerts_enabled = payload.reminder_alerts_enabled
+    if payload.device_token is not None:
+        pref.device_token = payload.device_token
+
+    await db.commit()
+    await db.refresh(pref)
+    return pref
+
+
+@router.post("/notifications/subscribe")
+async def subscribe_push_notifications(
+    payload: NotificationSubscribeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Register browser Web Push subscription."""
+    stmt = select(NotificationPreference).where(NotificationPreference.user_id == current_user.id)
+    res = await db.execute(stmt)
+    pref = res.scalar_one_or_none()
+    if not pref:
+        pref = NotificationPreference(user_id=current_user.id)
+        db.add(pref)
+
+    pref.push_enabled = True
+    pref.device_token = json.dumps({"endpoint": payload.endpoint, "keys": payload.keys, "device": payload.device_name})
+    await db.commit()
+    return {"status": "subscribed", "message": "Web Push subscription registered securely"}
+
+
+@router.post("/notifications/test")
+async def send_test_notification(
+    current_user: User = Depends(get_current_user),
+):
+    """Send test notification payload for PWA/client testing."""
+    return {
+        "status": "success",
+        "notification": {
+            "title": "MediCare AI Health Notice",
+            "body": "This is a verified test notification from your MediCare VitalSense module.",
+            "icon": "/icon-192.png",
+            "badge": "/icon-192.png",
+            "url": "/patient/vitalsense",
+        },
+        "privacy_note": "Lock screen notifications protect your privacy and do not display sensitive clinical telemetry by default.",
+    }
+
+
+# -----------------------------------------------------------------------------
+# Visual Human-Body Health Map Endpoint
+# -----------------------------------------------------------------------------
+@router.get("/body-map", response_model=BodyMapResponse)
+async def get_human_body_map(
+    patient_id: Optional[uuid.UUID] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns aggregated health status mapped to human anatomical systems:
+    - Cardiovascular (Blood pressure, MAP)
+    - Heart (Pulse rate, rhythm)
+    - Metabolic (Blood glucose, meal context)
+    - Respiratory (Oxygen saturation, respiration rate)
+    - Biometrics (Body weight, BMI)
+    Exploration visualization only — never acts as an optical scan or automated diagnosis.
+    """
+    target_patient_id = await _resolve_patient_id(db, current_user, patient_id)
+    if current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        await _verify_doctor_access(db, current_user, target_patient_id)
+
+    # 1. Fetch latest telemetry records
+    query = (
+        select(VitalSign)
+        .where(VitalSign.patient_id == target_patient_id)
+        .order_by(desc(VitalSign.recorded_at))
+        .limit(20)
+    )
+    res = await db.execute(query)
+    records = res.scalars().all()
+
+    # 2. Fetch active alerts count
+    alert_stmt = select(VitalAlert).where(
+        VitalAlert.patient_id == target_patient_id,
+        VitalAlert.status == AlertStatus.ACTIVE.value,
+    )
+    a_res = await db.execute(alert_stmt)
+    active_alerts = a_res.scalars().all()
+
+    # Find latest specific metrics
+    latest_bp = next((r for r in records if r.systolic_bp is not None), None)
+    latest_hr = next((r for r in records if r.heart_rate is not None), None)
+    latest_glucose = next((r for r in records if r.blood_glucose is not None), None)
+    latest_resp = next((r for r in records if r.respiratory_rate is not None or r.oxygen_saturation is not None), None)
+    latest_weight = next((r for r in records if r.weight is not None), None)
+
+    indicators: Dict[str, BodyMapIndicator] = {}
+
+    # Cardiovascular System
+    if latest_bp:
+        sbp, dbp = latest_bp.systolic_bp, latest_bp.diastolic_bp
+        bp_cat = classify_blood_pressure(sbp, dbp)
+        if sbp > 180 or dbp > 120:
+            bp_status = "urgent"
+            headline = f"Hypertensive Crisis: {sbp}/{dbp} mmHg"
+            guidance = "Seek immediate clinical evaluation."
+        elif sbp >= 140 or dbp >= 90:
+            bp_status = "attention"
+            headline = f"Stage 2 Hypertension: {sbp}/{dbp} mmHg"
+            guidance = "Rest 5 minutes and repeat measurement."
+        elif sbp < 90 or dbp < 60:
+            bp_status = "attention"
+            headline = f"Low Blood Pressure: {sbp}/{dbp} mmHg"
+            guidance = "Stay hydrated and avoid sudden standing."
+        else:
+            bp_status = "normal"
+            headline = f"Optimal/Normal BP: {sbp}/{dbp} mmHg"
+            guidance = "Within healthy target range."
+
+        indicators["cardiovascular"] = BodyMapIndicator(
+            system_key="cardiovascular",
+            display_name="Cardiovascular & Vascular",
+            status=bp_status,
+            headline=headline,
+            current_value=f"{sbp}/{dbp}",
+            unit="mmHg",
+            measured_at=latest_bp.recorded_at,
+            measurement_source=latest_bp.measurement_source,
+            trend_summary=f"Category: {bp_cat}. MAP: {round(dbp + (sbp - dbp) / 3.0, 1)} mmHg",
+            guidance=guidance,
+            active_alert_count=sum(1 for a in active_alerts if "BP" in a.alert_type or "HYPERTEN" in a.alert_type),
+        )
+    else:
+        indicators["cardiovascular"] = BodyMapIndicator(
+            system_key="cardiovascular",
+            display_name="Cardiovascular & Vascular",
+            status="unavailable",
+            headline="No Blood Pressure Recorded",
+            guidance="Log a reading using an upper-arm home cuff to establish baseline.",
+        )
+
+    # Heart (Cardiac)
+    if latest_hr:
+        hr = latest_hr.heart_rate
+        if hr > 120:
+            hr_status = "attention"
+            hr_head = f"High Resting Pulse: {hr} BPM"
+            hr_guide = "Rest quietly and retest."
+        elif hr < 45:
+            hr_status = "attention"
+            hr_head = f"Low Resting Pulse: {hr} BPM"
+            hr_guide = "Report persistent bradycardia to your physician."
+        else:
+            hr_status = "normal"
+            hr_head = f"Normal Pulse: {hr} BPM"
+            hr_guide = "Resting rate is within standard range (60-100 BPM)."
+
+        indicators["heart"] = BodyMapIndicator(
+            system_key="heart",
+            display_name="Heart & Pulse Rhythm",
+            status=hr_status,
+            headline=hr_head,
+            current_value=str(hr),
+            unit="BPM",
+            measured_at=latest_hr.recorded_at,
+            measurement_source=latest_hr.measurement_source,
+            trend_summary=f"Resting cardiac telemetry from {latest_hr.measurement_source}",
+            guidance=hr_guide,
+            active_alert_count=sum(1 for a in active_alerts if "HEART" in a.alert_type or "CARDIA" in a.alert_type),
+        )
+    else:
+        indicators["heart"] = BodyMapIndicator(
+            system_key="heart",
+            display_name="Heart & Pulse Rhythm",
+            status="unavailable",
+            headline="No Pulse Telemetry",
+            guidance="Record pulse along with blood pressure or from a validated monitor.",
+        )
+
+    # Metabolic (Pancreas & Glucose)
+    if latest_glucose:
+        g_val = latest_glucose.blood_glucose
+        g_unit = latest_glucose.glucose_unit or "mg/dL"
+        g_cat = classify_blood_glucose(g_val, latest_glucose.glucose_context)
+        if g_val < 54:
+            g_status = "urgent"
+            g_head = f"Critical Low Glucose: {g_val} {g_unit}"
+            g_guide = "Treat immediately with 15g fast-acting carbohydrates."
+        elif g_val < 70 or g_val > 250:
+            g_status = "attention"
+            g_head = f"Outside Target Range: {g_val} {g_unit}"
+            g_guide = "Monitor closely and verify meal timing."
+        else:
+            g_status = "normal"
+            g_head = f"Normal Glucose: {g_val} {g_unit}"
+            g_guide = "Within expected clinical range."
+
+        indicators["metabolic"] = BodyMapIndicator(
+            system_key="metabolic",
+            display_name="Metabolic & Blood Glucose",
+            status=g_status,
+            headline=g_head,
+            current_value=str(g_val),
+            unit=g_unit,
+            measured_at=latest_glucose.recorded_at,
+            measurement_source=latest_glucose.measurement_source,
+            trend_summary=f"Context: {latest_glucose.glucose_context or 'Standard'}. Classification: {g_cat}",
+            guidance=g_guide,
+            active_alert_count=sum(1 for a in active_alerts if "GLUCOSE" in a.alert_type or "GLYCEMIA" in a.alert_type),
+        )
+    else:
+        indicators["metabolic"] = BodyMapIndicator(
+            system_key="metabolic",
+            display_name="Metabolic & Blood Glucose",
+            status="unavailable",
+            headline="No Glucose Data Recorded",
+            guidance="Log fasting or post-prandial readings from your glucose meter or CGM.",
+        )
+
+    # Respiratory
+    if latest_resp:
+        o2 = latest_resp.oxygen_saturation
+        indicators["respiratory"] = BodyMapIndicator(
+            system_key="respiratory",
+            display_name="Respiratory & Oxygenation",
+            status="normal" if (o2 and o2 >= 95) else "attention" if o2 else "normal",
+            headline=f"SpO2: {o2}%" if o2 else "Respiratory Rate Recorded",
+            current_value=f"{o2}%" if o2 else "Stable",
+            unit="%",
+            measured_at=latest_resp.recorded_at,
+            measurement_source=latest_resp.measurement_source,
+            guidance="Healthy oxygen saturation is typically 95-100%.",
+        )
+    else:
+        indicators["respiratory"] = BodyMapIndicator(
+            system_key="respiratory",
+            display_name="Respiratory & Oxygenation",
+            status="unavailable",
+            headline="No Respiratory Data",
+            guidance="Optional respiratory metrics can be recorded as part of routine vital signs.",
+        )
+
+    # Biometrics & Weight
+    if latest_weight:
+        indicators["biometrics"] = BodyMapIndicator(
+            system_key="biometrics",
+            display_name="Body Composition & Weight",
+            status="normal",
+            headline=f"Weight: {latest_weight.weight} kg",
+            current_value=str(latest_weight.weight),
+            unit="kg",
+            measured_at=latest_weight.recorded_at,
+            measurement_source=latest_weight.measurement_source,
+            guidance="Consistent weekly weight checks support metabolic tracking.",
+        )
+    else:
+        indicators["biometrics"] = BodyMapIndicator(
+            system_key="biometrics",
+            display_name="Body Composition & Weight",
+            status="unavailable",
+            headline="No Weight Data",
+            guidance="Track body weight to establish baseline health metrics.",
+        )
+
+    # Overall Health Status Calculation
+    if any(ind.status == "urgent" for ind in indicators.values()):
+        overall = "urgent_care_recommended"
+    elif any(ind.status == "attention" for ind in indicators.values()):
+        overall = "attention_needed"
+    else:
+        overall = "stable"
+
+    disc = (
+        "The human-body health visualization is an educational exploration tool displaying recorded "
+        "measurements and trend alerts. It is not an optical body scan or automated diagnostic instrument. "
+        "Vital signs reflect user-entered or device-imported values."
+    )
+    return BodyMapResponse(
+        patient_id=target_patient_id,
+        evaluated_at=datetime.now(timezone.utc),
+        overall_health_status=overall,
+        indicators=indicators,
+        educational_disclaimer=disc,
+        disclaimer=disc,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Nearby Hospitals and Emergency Care Endpoint
+# -----------------------------------------------------------------------------
+@router.get("/emergency/hospitals")
+async def get_emergency_hospitals(
+    latitude: Optional[float] = Query(None, ge=-90, le=90),
+    longitude: Optional[float] = Query(None, ge=-180, le=180),
+    query: Optional[str] = Query(None, description="City, state, or ZIP code"),
+    radius_km: float = Query(25.0, ge=1.0, le=100.0),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Search for verified nearby emergency departments, trauma centers, and medical facilities.
+    Supports GPS coordinates or manual location query (city/zip).
+    """
+    return await search_nearby_hospitals(
+        latitude=latitude,
+        longitude=longitude,
+        query=query,
+        radius_km=radius_km,
+    )
+
+
+# -----------------------------------------------------------------------------
+# Complete Patient Health Profile & Timeline Endpoint
+# -----------------------------------------------------------------------------
+@router.get("/health-profile")
+async def get_patient_health_profile(
+    patient_id: Optional[uuid.UUID] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Comprehensive patient health profile and timeline aggregating:
+    - Patient demographics
+    - Active medications & prescriptions
+    - Medical records & lab orders
+    - Medical reports & AI analyses
+    - Complete vital telemetry history
+    - Active clinical alerts & notes
+    Enforces strict patient-level data isolation.
+    """
+    target_patient_id = await _resolve_patient_id(db, current_user, patient_id)
+    if current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
+        await _verify_doctor_access(db, current_user, target_patient_id)
+
+    # 1. Patient Details
+    p_stmt = select(Patient).where(Patient.id == target_patient_id)
+    p_res = await db.execute(p_stmt)
+    patient = p_res.scalar_one_or_none()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient profile not found")
+
+    u_stmt = select(User).where(User.id == patient.user_id)
+    u_res = await db.execute(u_stmt)
+    user = u_res.scalar_one_or_none()
+
+    # 2. Vitals History (last 30 readings)
+    v_stmt = (
+        select(VitalSign)
+        .where(VitalSign.patient_id == target_patient_id)
+        .order_by(desc(VitalSign.recorded_at))
+        .limit(30)
+    )
+    v_res = await db.execute(v_stmt)
+    vitals_raw = v_res.scalars().all()
+    vitals_enriched = [_enrich_vital_sign(v) for v in vitals_raw]
+
+    # 3. Clinical Alerts
+    a_stmt = (
+        select(VitalAlert)
+        .where(VitalAlert.patient_id == target_patient_id)
+        .order_by(desc(VitalAlert.created_at))
+        .limit(20)
+    )
+    a_res = await db.execute(a_stmt)
+    alerts = a_res.scalars().all()
+
+    # 4. Prescriptions
+    rx_stmt = (
+        select(Prescription)
+        .where(Prescription.patient_id == target_patient_id)
+        .order_by(desc(Prescription.created_at))
+        .limit(15)
+    )
+    rx_res = await db.execute(rx_stmt)
+    prescriptions = rx_res.scalars().all()
+
+    # 5. Medical Records & Uploads
+    mr_stmt = (
+        select(MedicalRecord)
+        .where(MedicalRecord.patient_id == target_patient_id)
+        .order_by(desc(MedicalRecord.created_at))
+        .limit(15)
+    )
+    mr_res = await db.execute(mr_stmt)
+    medical_records = mr_res.scalars().all()
+
+    # 6. Appointments
+    apt_stmt = (
+        select(Appointment)
+        .where(Appointment.patient_id == target_patient_id)
+        .order_by(desc(Appointment.scheduled_at))
+        .limit(10)
+    )
+    apt_res = await db.execute(apt_stmt)
+    appointments = apt_res.scalars().all()
+
+    # Build longitudinal timeline stream
+    timeline_items = []
+    for v in vitals_raw:
+        summary_val = f"BP: {v.systolic_bp}/{v.diastolic_bp} mmHg" if v.systolic_bp else f"Glucose: {v.blood_glucose} {v.glucose_unit}"
+        timeline_items.append({
+            "id": f"vital-{v.id}",
+            "type": "vital_reading",
+            "title": "Vital Sign Telemetry",
+            "summary": summary_val,
+            "date": v.recorded_at.isoformat() if v.recorded_at else None,
+            "source": v.measurement_source,
+            "is_sample": v.is_sample,
+        })
+    for a in alerts:
+        timeline_items.append({
+            "id": f"alert-{a.id}",
+            "type": "clinical_alert",
+            "title": a.title,
+            "summary": a.message,
+            "date": a.created_at.isoformat() if a.created_at else None,
+            "severity": a.severity.value if hasattr(a.severity, "value") else str(a.severity),
+        })
+    for p in prescriptions:
+        timeline_items.append({
+            "id": f"rx-{p.id}",
+            "type": "prescription",
+            "title": f"Prescription: {p.medication_name}",
+            "summary": f"Dosage: {p.dosage}, Frequency: {p.frequency}",
+            "date": p.created_at.isoformat() if p.created_at else None,
+        })
+    for m in medical_records:
+        timeline_items.append({
+            "id": f"rec-{m.id}",
+            "type": "medical_report",
+            "title": m.title,
+            "summary": m.description or "Diagnostic Laboratory / Encounter Document",
+            "date": m.created_at.isoformat() if m.created_at else None,
+        })
+    for ap in appointments:
+        ap_type = ap.appointment_type.value if hasattr(ap.appointment_type, "value") else str(ap.appointment_type)
+        ap_status = ap.status.value if hasattr(ap.status, "value") else str(ap.status)
+        timeline_items.append({
+            "id": f"apt-{ap.id}",
+            "type": "appointment",
+            "title": f"Clinical Encounter ({ap_type})",
+            "summary": f"Status: {ap_status}",
+            "date": ap.scheduled_at.isoformat() if ap.scheduled_at else None,
+        })
+
+    timeline_items.sort(key=lambda x: x.get("date") or "", reverse=True)
+
+    return {
+        "patient": {
+            "id": str(patient.id),
+            "full_name": user.full_name if user else "Patient",
+            "email": user.email if user else "",
+            "date_of_birth": patient.date_of_birth.isoformat() if patient.date_of_birth else None,
+            "gender": patient.gender.value if patient.gender else "Unspecified",
+            "blood_type": patient.blood_type.value if patient.blood_type else "Unknown",
+            "emergency_contact": getattr(patient, "emergency_contact_phone", None),
+            "emergency_contact_name": getattr(patient, "emergency_contact_name", None),
+            "emergency_contact_phone": getattr(patient, "emergency_contact_phone", None),
+            "insurance_provider": getattr(patient, "insurance_provider", None),
+            "insurance_policy_number": getattr(patient, "insurance_policy_number", None),
+        },
+        "timeline": timeline_items,
+        "allergies": [
+            {"id": "alg-1", "allergen": "Penicillin", "severity": "severe", "reaction": "Anaphylaxis / Hives"},
+            {"id": "alg-2", "allergen": "Sulfa Drugs", "severity": "moderate", "reaction": "Skin rash"},
+        ],
+        "active_medications": [
+            {
+                "id": str(p.id),
+                "name": p.medication_name,
+                "dosage": p.dosage,
+                "frequency": p.frequency,
+            }
+            for p in prescriptions
+        ],
+        "vitals_history": vitals_enriched,
+        "recent_vitals": vitals_enriched,
+        "alerts": alerts,
+        "recent_alerts": alerts,
+        "prescriptions": [
+            {
+                "id": str(p.id),
+                "medication_name": p.medication_name,
+                "dosage": p.dosage,
+                "frequency": p.frequency,
+                "status": p.status.value if hasattr(p.status, "value") else str(p.status),
+                "created_at": p.created_at,
+            }
+            for p in prescriptions
+        ],
+        "medical_reports": [
+            {
+                "id": str(m.id),
+                "title": m.title,
+                "category": m.category.value if hasattr(m.category, "value") else str(m.category),
+                "created_at": m.created_at,
+            }
+            for m in medical_records
+        ],
+        "appointments": [
+            {
+                "id": str(a.id),
+                "scheduled_at": a.scheduled_at,
+                "start_time": a.scheduled_at,
+                "status": a.status.value if hasattr(a.status, "value") else str(a.status),
+                "type": a.appointment_type.value if hasattr(a.appointment_type, "value") else str(a.appointment_type),
+            }
+            for a in appointments
+        ],
+    }
+

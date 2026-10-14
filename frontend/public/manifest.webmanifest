@@ -1,0 +1,63 @@
+{
+  "name": "MediCare AI — Healthcare Management Platform",
+  "short_name": "MediCare AI",
+  "description": "Advanced vital monitoring, emergency hospital care, clinical records, and AI medical insights.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#071120",
+  "theme_color": "#0ea5e9",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["medical", "health", "lifestyle"],
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icon-maskable.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "VitalSense Telemetry",
+      "short_name": "VitalSense",
+      "description": "Log blood pressure, glucose, and heart rate vitals",
+      "url": "/patient/vitalsense",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "Emergency & Nearby Hospitals",
+      "short_name": "Emergency",
+      "description": "Quick access to emergency services and nearby hospitals",
+      "url": "/patient/hospitals",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "AI Prescription Analyzer",
+      "short_name": "Prescriptions",
+      "description": "Analyze medical prescriptions with AI",
+      "url": "/patient/prescriptions",
+      "icons": [{ "src": "/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

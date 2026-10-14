@@ -20,10 +20,16 @@ import {
   Pill,
   Sparkles,
   Microscope,
+  MapPin,
+  AlertCircle,
+  Gauge,
+  Droplet,
+  User,
   LucideIcon,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { getInitials } from '@/lib/utils'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 
 interface NavItem {
   to: string
@@ -34,6 +40,10 @@ interface NavItem {
 const PATIENT_NAV: NavItem[] = [
   { to: '/patient', icon: Home, label: 'Dashboard' },
   { to: '/patient/vitalsense', icon: Heart, label: 'MediCare VitalSense' },
+  { to: '/patient/vitalsense/blood-pressure', icon: Gauge, label: 'Blood Pressure' },
+  { to: '/patient/vitalsense/blood-glucose', icon: Droplet, label: 'Blood Glucose' },
+  { to: '/patient/hospitals', icon: MapPin, label: 'Emergency & Hospitals' },
+  { to: '/patient/profile', icon: User, label: 'Health Timeline' },
   { to: '/patient/vitalsense/research', icon: Microscope, label: 'PPG Research Lab' },
   { to: '/patient/prescriptions', icon: Pill, label: 'Prescription Analyzer' },
   { to: '/patient/reports', icon: FileSearch, label: 'Medical Report Analyzer' },
@@ -49,6 +59,7 @@ const PATIENT_NAV: NavItem[] = [
 const DOCTOR_NAV: NavItem[] = [
   { to: '/doctor', icon: Home, label: 'Dashboard' },
   { to: '/doctor/vitalsense', icon: Heart, label: 'VitalSense Clinical' },
+  { to: '/doctor/alerts', icon: AlertCircle, label: 'Clinical Alerts Queue' },
   { to: '/doctor/patients', icon: Users, label: 'My Patients' },
   { to: '/doctor/schedule', icon: Calendar, label: 'Schedule' },
   { to: '/doctor/encounters', icon: Stethoscope, label: 'Encounters' },
@@ -86,26 +97,12 @@ export function Sidebar() {
   return (
     <aside className="sidebar">
       {/* Logo */}
-      <div style={{ padding: '20px 20px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: 10,
-            background: 'linear-gradient(135deg, #3182f4, #14b8a6)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: '0 4px 12px rgba(49,130,244,0.4)',
-          }}>
-            <Heart size={18} color="white" />
-          </div>
-          <div>
-            <div style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1.1rem', fontWeight: 700, color: '#e2eaf4' }}>
-              MediCare
-            </div>
-          </div>
-        </div>
+      <div style={{ padding: '18px 18px 12px', borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+        <BrandLogo size={36} showText={true} />
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6,
           background: 'rgba(49,130,244,0.08)', border: '1px solid rgba(49,130,244,0.15)',
-          borderRadius: 20, padding: '2px 10px', marginTop: 4 }}>
-          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#3182f4' }}>{label}</span>
+          borderRadius: 20, padding: '2px 10px', marginTop: 10 }}>
+          <span style={{ fontSize: '0.7rem', fontWeight: 600, color: '#38bdf8' }}>{label}</span>
         </div>
       </div>
 

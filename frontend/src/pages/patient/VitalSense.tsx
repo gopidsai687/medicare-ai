@@ -41,6 +41,7 @@ import {
 } from 'recharts'
 import { api } from '@/lib/api'
 import { format } from 'date-fns'
+import { BodyMap } from '@/components/vitals/BodyMap'
 
 // -----------------------------------------------------------------------------
 // Interfaces
@@ -778,6 +779,9 @@ export default function VitalSense() {
           )}
         </div>
       </div>
+
+      {/* ── Interactive Human-Body Health Map ───────────────────────────── */}
+      <BodyMap />
 
       {/* ── Filter & Navigation Bar ───────────────────────────────────────── */}
       <div className="glass p-4 rounded-2xl flex flex-wrap items-center justify-between gap-4">

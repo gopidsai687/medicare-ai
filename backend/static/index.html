@@ -2,17 +2,35 @@
 <html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="description" content="MediCare — Advanced healthcare management platform for patients, doctors, and administrators. Manage records, appointments, and clinical workflows with AI assistance." />
+    <meta name="theme-color" content="#071120" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="MediCare AI" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <title>MediCare — Healthcare Management Platform</title>
-    <script type="module" crossorigin src="/assets/index-Dg4Yn_nM.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-2QBVsdm-.css">
+    <title>MediCare AI — Healthcare Management Platform</title>
+    <script type="module" crossorigin src="/assets/index-Bs1SRc6U.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DgHyt-IX.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').then(
+            (reg) => { console.log('MediCare PWA ServiceWorker registered with scope:', reg.scope); },
+            (err) => { console.log('MediCare ServiceWorker registration failed:', err); }
+          );
+        });
+      }
+    </script>
   </body>
 </html>
+

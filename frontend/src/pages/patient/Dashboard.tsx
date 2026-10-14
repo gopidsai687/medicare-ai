@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import api from '@/lib/api'
+import { BodyMap } from '@/components/vitals/BodyMap'
 
 const stats = [
   { label: 'Upcoming Appointments', value: '2', icon: Calendar, color: '#3182f4', bg: 'rgba(49,130,244,0.1)' },
@@ -219,6 +220,68 @@ export default function PatientDashboard() {
               <span>View Analysis History</span>
               <ArrowRight size={14} />
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Body Map Anatomical Status */}
+      <div className="animate-fade-in-up" style={{ marginBottom: 28 }}>
+        <BodyMap />
+      </div>
+
+      {/* Quick Navigation Cards: VitalSense Specific Portals */}
+      <div className="animate-fade-in-up" style={{ marginBottom: 28 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
+          <div
+            onClick={() => navigate('/patient/vitalsense/blood-pressure')}
+            className="glass stat-card"
+            style={{ padding: '16px 18px', cursor: 'pointer', border: '1px solid rgba(56,189,248,0.2)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Activity size={20} color="#38bdf8" />
+              <ArrowRight size={13} color="#38bdf8" />
+            </div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc' }}>Blood Pressure Tracker</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>AHA/ACC stages, MAP, Omron sync</div>
+          </div>
+
+          <div
+            onClick={() => navigate('/patient/vitalsense/blood-glucose')}
+            className="glass stat-card"
+            style={{ padding: '16px 18px', cursor: 'pointer', border: '1px solid rgba(45,212,191,0.2)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Heart size={20} color="#2dd4bf" />
+              <ArrowRight size={13} color="#2dd4bf" />
+            </div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc' }}>Blood Glucose Tracker</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>mg/dL & mmol/L, TIR, CGM sync</div>
+          </div>
+
+          <div
+            onClick={() => navigate('/patient/hospitals')}
+            className="glass stat-card"
+            style={{ padding: '16px 18px', cursor: 'pointer', border: '1px solid rgba(239,68,68,0.3)', background: 'rgba(239,68,68,0.06)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Zap size={20} color="#ef4444" />
+              <ArrowRight size={13} color="#ef4444" />
+            </div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fca5a5' }}>Emergency & Hospitals</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>Instant 911, verified ER facilities</div>
+          </div>
+
+          <div
+            onClick={() => navigate('/patient/profile')}
+            className="glass stat-card"
+            style={{ padding: '16px 18px', cursor: 'pointer', border: '1px solid rgba(167,139,250,0.2)' }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <ClipboardList size={20} color="#a78bfa" />
+              <ArrowRight size={13} color="#a78bfa" />
+            </div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc' }}>Health Timeline</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>Consolidated longitudinal chart</div>
           </div>
         </div>
       </div>

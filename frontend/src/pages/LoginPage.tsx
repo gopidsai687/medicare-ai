@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Heart, Eye, EyeOff, Shield, Stethoscope, User, AlertCircle, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Shield, Stethoscope, User, AlertCircle, Loader2 } from 'lucide-react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useAuth } from '@/lib/auth'
+import { BrandLogo } from '@/components/brand/BrandLogo'
 
 const schema = z.object({
   email: z.string().email('Enter a valid email'),
@@ -99,22 +100,16 @@ export default function LoginPage() {
 
       <div style={{ width: '100%', maxWidth: 460, position: 'relative', zIndex: 1 }}>
         {/* Logo */}
-        <div className="animate-fade-in-up text-center" style={{ marginBottom: 36 }}>
-          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 16 }}>
-            <div style={{
-              width: 64, height: 64, borderRadius: 18,
-              background: 'linear-gradient(135deg, #3182f4, #14b8a6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              boxShadow: '0 8px 32px rgba(49,130,244,0.4)',
-            }} className="animate-pulse-glow">
-              <Heart size={30} color="white" />
-            </div>
+        <div className="animate-fade-in-up text-center" style={{ marginBottom: 32 }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: 12 }}>
+            <BrandLogo size={58} showText={false} />
           </div>
-          <h1 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2rem', fontWeight: 800, margin: '0 0 6px' }}>
+          <h1 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '2.1rem', fontWeight: 800, margin: '0 0 4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
             <span className="gradient-text">MediCare</span>
+            <span style={{ fontSize: '0.75rem', padding: '3px 8px', borderRadius: '6px', background: 'linear-gradient(135deg, #0ea5e9, #14b8a6)', color: '#071120', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.08em' }}>AI</span>
           </h1>
           <p style={{ color: '#5a7a9e', fontSize: '0.9rem', margin: 0 }}>
-            Healthcare Management Platform
+            Advanced Vital Monitoring & Healthcare Platform
           </p>
         </div>
 

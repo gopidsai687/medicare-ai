@@ -140,3 +140,76 @@ class WebAuthnCredential(UUIDMixin, TimestampMixin, Base):
     sign_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     device_name: Mapped[str | None] = mapped_column(String(150), nullable=True)  # e.g. "MacBook Touch ID", "Windows Hello"
     aaguid: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class AlertSeverity(str, enum.Enum):
+    INFO = "info"
+    ATTENTION = "attention"
+    URGENT = "urgent"
+
+
+class AlertStatus(str, enum.Enum):
+    ACTIVE = "active"
+    ACKNOWLEDGED = "acknowledged"
+    RESOLVED = "resolved"
+
+
+class VitalAlert(UUIDMixin, TimestampMixin, Base):
+    """
+    Clinically evaluated alerts triggered by abnormal vitals or stale monitoring.
+    Never acts as an automated diagnosis; clearly provides evidence-based guidance.
+    """
+    __tablename__ = "vital_alerts"
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    vital_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType(),
+        ForeignKey("vital_signs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    alert_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    severity: Mapped[str] = mapped_column(String(20), default="attention", nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(150), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    clinical_guidance: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), default="active", nullable=False, index=True)
+
+    # Doctor Follow-up & Audit
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    acknowledged_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType(),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    clinical_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
+    vital = relationship("VitalSign", foreign_keys=[vital_id], lazy="selectin")
+
+
+class NotificationPreference(UUIDMixin, TimestampMixin, Base):
+    """User preferences for push notifications, quiet hours, and alert channels."""
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    push_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    quiet_hours_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    quiet_hours_start: Mapped[str] = mapped_column(String(10), default="22:00", nullable=False)
+    quiet_hours_end: Mapped[str] = mapped_column(String(10), default="07:00", nullable=False)
+    urgent_override_quiet_hours: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    bp_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    glucose_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    reminder_alerts_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    device_token: Mapped[str | None] = mapped_column(Text, nullable=True)
+

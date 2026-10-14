@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
@@ -35,6 +35,8 @@ def classify_blood_pressure(systolic: Optional[int], diastolic: Optional[int]) -
 def classify_blood_glucose(glucose_mgdl: Optional[float], context: Optional[str] = "fasting") -> Optional[str]:
     if glucose_mgdl is None:
         return None
+    if glucose_mgdl < 54:
+        return "Severe Hypoglycemia (<54)"
     if glucose_mgdl < 70:
         return "Hypoglycemia (Low)"
     
@@ -117,6 +119,7 @@ class VitalSignRead(VitalSignBase):
     bp_category: Optional[str] = None
     glucose_category: Optional[str] = None
     mean_arterial_pressure: Optional[float] = None
+    alert: Optional[Any] = None
 
 
 # ---------------------------------------------------------
@@ -340,3 +343,93 @@ class WebAuthnAuthVerifyRequest(BaseModel):
     credential_id: str
     signature: str
     client_data_json: str
+
+
+# ---------------------------------------------------------
+# Alerts & Notification Schemas
+# ---------------------------------------------------------
+class VitalAlertRead(BaseModel):
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    vital_id: Optional[uuid.UUID] = None
+    alert_type: str
+    severity: str  # info, attention, urgent
+    title: str
+    message: str
+    clinical_guidance: str
+    status: str  # active, acknowledged, resolved
+    created_at: datetime
+    acknowledged_at: Optional[datetime] = None
+    acknowledged_by_id: Optional[uuid.UUID] = None
+    clinical_notes: Optional[str] = None
+    doctor_review_notes: Optional[str] = None
+    follow_up_action: Optional[str] = None
+    patient_name: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VitalAlertAcknowledgeRequest(BaseModel):
+    clinical_notes: Optional[str] = None
+    doctor_review_notes: Optional[str] = None
+    follow_up_action: Optional[str] = None
+
+
+class NotificationPreferenceRead(BaseModel):
+    user_id: uuid.UUID
+    push_enabled: bool = True
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: str = "22:00"
+    quiet_hours_end: str = "07:00"
+    urgent_override_quiet_hours: bool = True
+    bp_alerts_enabled: bool = True
+    glucose_alerts_enabled: bool = True
+    reminder_alerts_enabled: bool = True
+    device_token: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationPreferenceUpdate(BaseModel):
+    push_enabled: Optional[bool] = None
+    quiet_hours_enabled: Optional[bool] = None
+    quiet_hours_start: Optional[str] = None
+    quiet_hours_end: Optional[str] = None
+    urgent_override_quiet_hours: Optional[bool] = None
+    bp_alerts_enabled: Optional[bool] = None
+    glucose_alerts_enabled: Optional[bool] = None
+    reminder_alerts_enabled: Optional[bool] = None
+    device_token: Optional[str] = None
+
+
+class NotificationSubscribeRequest(BaseModel):
+    endpoint: str
+    keys: dict
+    device_name: Optional[str] = "Web Push Client"
+
+
+# ---------------------------------------------------------
+# Visual Human-Body Health Map Schemas
+# ---------------------------------------------------------
+class BodyMapIndicator(BaseModel):
+    system_key: str  # cardiovascular, metabolic, respiratory, vitals, biometrics
+    display_name: str
+    status: str  # normal, attention, urgent, stale, unavailable
+    headline: str
+    current_value: Optional[str] = None
+    unit: Optional[str] = None
+    measured_at: Optional[datetime] = None
+    measurement_source: Optional[str] = None
+    trend_summary: Optional[str] = None
+    guidance: Optional[str] = None
+    active_alert_count: int = 0
+
+
+class BodyMapResponse(BaseModel):
+    patient_id: uuid.UUID
+    evaluated_at: datetime
+    overall_health_status: str  # stable, attention_needed, urgent_care_recommended
+    indicators: Dict[str, BodyMapIndicator]
+    educational_disclaimer: str
+    disclaimer: Optional[str] = None
+

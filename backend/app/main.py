@@ -52,6 +52,21 @@ async def lifespan(app: FastAPI):
                     await conn.execute(text(f"ALTER TABLE vital_signs ADD COLUMN {col_name} {col_def}"))
             except Exception:
                 pass
+
+        alert_cols = [
+            ("doctor_review_notes", "VARCHAR(1000)"),
+            ("follow_up_action", "VARCHAR(500)"),
+            ("actioned_by_id", "VARCHAR(36)"),
+            ("actioned_at", "TIMESTAMP"),
+        ]
+        for col_name, col_def in alert_cols:
+            try:
+                if is_pg:
+                    await conn.execute(text(f"ALTER TABLE vital_alerts ADD COLUMN IF NOT EXISTS {col_name} {col_def}"))
+                else:
+                    await conn.execute(text(f"ALTER TABLE vital_alerts ADD COLUMN {col_name} {col_def}"))
+            except Exception:
+                pass
     log.info("Database tables ready")
     try:
         async with AsyncSessionFactory() as session:

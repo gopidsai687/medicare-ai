@@ -14,6 +14,13 @@ from app.schemas.vital_sign import (
     VitalReminderCreate,
     VitalReminderRead,
     VitalSharingConsentRead,
+    VitalAlertRead,
+    VitalAlertAcknowledgeRequest,
+    NotificationPreferenceRead,
+    NotificationPreferenceUpdate,
+    NotificationSubscribeRequest,
+    BodyMapIndicator,
+    BodyMapResponse,
 )
 from app.schemas.encounter import EncounterCreate, EncounterRead, EncounterUpdate
 

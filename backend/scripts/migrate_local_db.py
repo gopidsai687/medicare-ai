@@ -77,6 +77,46 @@ CREATE TABLE IF NOT EXISTS webauthn_credentials (
 )
 """)
 
+# 5. Create vital_alerts table if not exists
+cur.execute("""
+CREATE TABLE IF NOT EXISTS vital_alerts (
+    id VARCHAR(36) PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    patient_id VARCHAR(36) NOT NULL REFERENCES patients(id) ON DELETE CASCADE,
+    vital_id VARCHAR(36) REFERENCES vital_signs(id) ON DELETE SET NULL,
+    alert_type VARCHAR(50) NOT NULL,
+    severity VARCHAR(20) DEFAULT 'attention' NOT NULL,
+    title VARCHAR(150) NOT NULL,
+    message TEXT NOT NULL,
+    clinical_guidance TEXT NOT NULL,
+    status VARCHAR(20) DEFAULT 'active' NOT NULL,
+    acknowledged_at TIMESTAMP,
+    acknowledged_by_id VARCHAR(36) REFERENCES users(id) ON DELETE SET NULL,
+    clinical_notes TEXT
+)
+""")
+
+# 6. Create notification_preferences table if not exists
+cur.execute("""
+CREATE TABLE IF NOT EXISTS notification_preferences (
+    id VARCHAR(36) PRIMARY KEY,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    user_id VARCHAR(36) NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    push_enabled BOOLEAN DEFAULT 1 NOT NULL,
+    quiet_hours_enabled BOOLEAN DEFAULT 0 NOT NULL,
+    quiet_hours_start VARCHAR(10) DEFAULT '22:00' NOT NULL,
+    quiet_hours_end VARCHAR(10) DEFAULT '07:00' NOT NULL,
+    urgent_override_quiet_hours BOOLEAN DEFAULT 1 NOT NULL,
+    bp_alerts_enabled BOOLEAN DEFAULT 1 NOT NULL,
+    glucose_alerts_enabled BOOLEAN DEFAULT 1 NOT NULL,
+    reminder_alerts_enabled BOOLEAN DEFAULT 1 NOT NULL,
+    device_token TEXT
+)
+""")
+
 con.commit()
 con.close()
 print("Local database schema migrated successfully!")
+
