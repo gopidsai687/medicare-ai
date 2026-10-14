@@ -147,8 +147,8 @@ with urllib.request.urlopen(bm_req, timeout=15) as res:
 # 10. Cross-Patient Isolation Security Check
 # Doctor cannot access non-consented patient data without consent
 unauthorized_req = urllib.request.Request(
-    f"{BASE}/api/v1/vitals/history?patient_id=00000000-0000-0000-0000-000000000001",
-    headers={"Authorization": f"Bearer {pat_token}", "User-Agent": "Mozilla/5.0"},
+    f"{BASE}/api/v1/vitals/doctor/patients/00000000-0000-0000-0000-000000000001",
+    headers={"Authorization": f"Bearer {doc_token}", "User-Agent": "Mozilla/5.0"},
 )
 try:
     with urllib.request.urlopen(unauthorized_req, timeout=15) as res:
