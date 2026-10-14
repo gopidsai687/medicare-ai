@@ -151,6 +151,8 @@ from fastapi import HTTPException
 
 dist_candidates = [
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "dist")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "static")),
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static")),
     os.path.abspath("static"),
     os.path.abspath("frontend/dist"),
