@@ -20,6 +20,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { format } from 'date-fns'
+import { DigitalTwinHUD } from './DigitalTwinHUD'
 
 export interface BodyMapIndicator {
   system_name: string
@@ -54,6 +55,7 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
   } | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedSystem, setSelectedSystem] = useState<string>('cardiovascular')
+  const [viewMode, setViewMode] = useState<'standard' | 'digital_twin'>('standard')
 
   const fetchBodyMap = async () => {
     try {
@@ -178,15 +180,49 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
           </p>
         </div>
 
-        <button
-          onClick={fetchBodyMap}
-          disabled={loading}
-          className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 self-start sm:self-auto"
-        >
-          <RefreshCw size={13} className={loading ? 'animate-spin text-teal-400' : ''} />
-          <span>Refresh Map</span>
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* View Mode Switcher */}
+          <div className="flex items-center p-1 rounded-xl bg-slate-950/80 border border-slate-800">
+            <button
+              type="button"
+              onClick={() => setViewMode('standard')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                viewMode === 'standard'
+                  ? 'bg-teal-600 text-white shadow'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              Anatomical Map
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('digital_twin')}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                viewMode === 'digital_twin'
+                  ? 'bg-cyan-600 text-white shadow-[0_0_12px_rgba(6,182,212,0.3)]'
+                  : 'text-slate-400 hover:text-white'
+              }`}
+            >
+              <Activity size={13} className="text-cyan-400" />
+              <span>Diagnostics HUD</span>
+            </button>
+          </div>
+
+          <button
+            onClick={fetchBodyMap}
+            disabled={loading}
+            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white border border-slate-700 text-xs font-medium cursor-pointer transition-colors flex items-center gap-1.5 self-start sm:self-auto"
+          >
+            <RefreshCw size={13} className={loading ? 'animate-spin text-teal-400' : ''} />
+            <span>Refresh</span>
+          </button>
+        </div>
       </div>
+
+      {viewMode === 'digital_twin' ? (
+        <DigitalTwinHUD />
+      ) : (
+        <>
 
       {/* Mandatory Clinical Transparency Disclaimer */}
       <div className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 text-xs text-slate-400 flex items-start gap-2.5">
@@ -537,6 +573,8 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   )
 }

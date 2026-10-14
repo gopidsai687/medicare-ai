@@ -6,17 +6,17 @@ import sys
 import re
 
 BASE = "https://medicare-ai-iv31.onrender.com"
-TARGET_COMMIT = "2809e3e"
-EXPECTED_BUNDLE = "index-DnSm1ysR"
-EXPECTED_CSS = "index-D1lEIQpV"
+TARGET_COMMIT = "login-fix"
+EXPECTED_BUNDLE = "index-Ix3KBKl5"
+EXPECTED_CSS = "index-B0d9Y_eN"
 
 print("==================================================================", flush=True)
 print(f"Monitoring Render for Live Deployment of Commit {TARGET_COMMIT}...", flush=True)
-print("Checking for Frontend Bundles (index-Cr7TuGBo.js & index-DVB9OdQu.css)...", flush=True)
+print(f"Checking for Frontend Bundles ({EXPECTED_BUNDLE} & {EXPECTED_CSS})...", flush=True)
 print("==================================================================", flush=True)
 
 deployed = False
-for attempt in range(1, 120):
+for attempt in range(1, 150):
     try:
         req = urllib.request.Request(f"{BASE}/", headers={"User-Agent": "Mozilla/5.0"})
         with urllib.request.urlopen(req, timeout=20) as res:

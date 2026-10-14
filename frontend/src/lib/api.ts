@@ -4,15 +4,20 @@ const BASE_URL = import.meta.env.VITE_API_URL ?? ''
 
 export const api = axios.create({
   baseURL: BASE_URL,
+  timeout: 15000, // 15-second timeout to prevent stuck loading spinners
   headers: { 'Content-Type': 'application/json' },
   withCredentials: false,
 })
 
 // ── Request interceptor: attach access token ──────────────────────────────
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
+  // Never send stale Authorization header to login or refresh endpoints
+  const url = config.url || ''
+  if (!url.includes('/api/v1/auth/login') && !url.includes('/api/v1/auth/refresh')) {
+    const token = localStorage.getItem('access_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
   }
   return config
 })
@@ -33,7 +38,12 @@ api.interceptors.response.use(
   (res) => res,
   async (error) => {
     const originalRequest = error.config
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    const url = originalRequest?.url || ''
+
+    // DO NOT intercept 401 on login or refresh endpoints — let callers receive credentials error
+    const isAuthEndpoint = url.includes('/api/v1/auth/login') || url.includes('/api/v1/auth/refresh')
+
+    if (error.response?.status === 401 && !originalRequest?._retry && !isAuthEndpoint) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({
@@ -55,7 +65,7 @@ api.interceptors.response.use(
 
         const { data } = await axios.post(`${BASE_URL}/api/v1/auth/refresh`, {
           refresh_token: refreshToken,
-        })
+        }, { timeout: 10000 })
 
         localStorage.setItem('access_token', data.access_token)
         api.defaults.headers.common.Authorization = `Bearer ${data.access_token}`
@@ -67,7 +77,9 @@ api.interceptors.response.use(
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         localStorage.removeItem('user_role')
-        window.location.href = '/login'
+        if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+          window.location.href = '/login'
+        }
         return Promise.reject(err)
       } finally {
         isRefreshing = false

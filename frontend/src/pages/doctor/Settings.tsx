@@ -16,7 +16,6 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import { useToast } from '@/lib/toast'
-import { PasskeySettingsCard } from '@/components/auth/PasskeySettingsCard'
 
 export default function DoctorSettings() {
   const { user } = useAuth()
@@ -298,9 +297,6 @@ export default function DoctorSettings() {
                 <p>As a licensed provider, HIPAA Security Rule (45 CFR § 164.312) requires MFA on all EHR systems. Contact IT Security to manage MFA device enrollment.</p>
               </div>
             </div>
-
-            {/* Biometric Passkey / Fingerprint Authentication */}
-            <PasskeySettingsCard />
           </div>
         )}
 

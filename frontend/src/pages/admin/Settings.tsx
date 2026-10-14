@@ -14,7 +14,6 @@ import {
   Zap,
   Sliders,
 } from 'lucide-react'
-import { PasskeySettingsCard } from '@/components/auth/PasskeySettingsCard'
 
 export default function AdminSettings() {
   const [activeTab, setActiveTab] = useState<'security' | 'hipaa' | 'ai' | 'infra'>('security')
@@ -199,9 +198,6 @@ export default function AdminSettings() {
               </div>
             </label>
           </div>
-
-          {/* Passkey & Biometric Credentials */}
-          <PasskeySettingsCard />
         </div>
       )}
 
