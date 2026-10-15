@@ -3,9 +3,11 @@ graph LR
         Router[React Router v6]
         AuthCtx[Auth Context & State Store]
         AxiosClient[Axios API Client with 15s Timeout]
+        HardwareDrivers[Hardware Drivers: WebSerial 115.2k | WebBluetooth GATT]
         
         subgraph Views ["Client Views"]
             V_Vital[VitalSense & Digital Twin HUD]
+            V_Device[Device Connections & Waveforms]
             V_Presc[Prescription Analysis UI]
             V_Report[Medical Report Analysis UI]
             V_DocAlert[Doctor Alert Queue UI]
@@ -20,14 +22,15 @@ graph LR
         subgraph Routers ["API v1 Routers"]
             R_Auth["/api/v1/auth"]
             R_Vitals["/api/v1/vitals"]
+            R_Devices["/api/v1/devices"]
             R_Presc["/api/v1/prescriptions"]
             R_Report["/api/v1/medical-reports"]
-            R_Devices["/api/v1/devices"]
             R_Audit["/api/v1/audit-logs"]
         end
 
         subgraph CoreServices ["Core Clinical Services"]
             S_AI[AIService - Gemini 2.5 Pro]
+            S_DeviceEng[Device & SQI Feasibility Engine]
             S_PrescPipe[PrescriptionPipeline - pypdf & OCR]
             S_ReportPipe[MedicalReportPipeline - 37 Term Dict]
             S_Alert[AlertEngine - Clinical Safety Bounds]
@@ -41,6 +44,7 @@ graph LR
         Schema[(PostgreSQL / SQLite medicare.db)]
     end
 
+    HardwareDrivers --> V_Device
     Views --> AxiosClient
     AxiosClient --> Middleware
     Middleware --> Routers
@@ -48,3 +52,4 @@ graph LR
     CoreServices --> Models
     Models --> ConnPool
     ConnPool --> Schema
+

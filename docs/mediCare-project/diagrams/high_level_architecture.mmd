@@ -1,46 +1,63 @@
 graph TB
+    subgraph Hardware ["Biomedical Hardware & Physical Sensor Layer"]
+        HW_PPG[Dual-Wavelength Optical PPG Sensor<br/>660nm Red / 940nm IR + Photodiode]
+        HW_BP[Bluetooth BLE Blood Pressure Cuff<br/>IEEE 1708 Oscillometric Reference]
+        HW_CGM[Continuous Glucose Monitor<br/>Subcutaneous Interstitial Sensor]
+        HW_Aux[Dermal Thermopile & Piezo Contact Load Cell<br/>Skin Temperature & Force 0.3-2.5N]
+    end
+
     subgraph Users ["User Layer"]
-        P[Patient Users]
-        D[Clinicians & Doctors]
-        A[Hospital Administrators]
+        P[Patient Users & Wearer]
+        D[Clinicians & Attending Physicians]
+        A[Hospital Administrators & Compliance Officers]
     end
 
     subgraph Presentation ["Presentation Layer (React 18 + Vite + Tailwind CSS)"]
-        UI_Login[Authentication & Session Guards]
-        UI_Pat[Patient Portal & VitalSense HUD]
-        UI_Doc[Doctor Triage & Alert Queue]
-        UI_Adm[Admin Governance & Audit Trail]
+        UI_Login[Authentication & Role-Based Session Guards]
+        UI_Pat[Patient Portal & VitalSense Digital Twin HUD]
+        UI_Dev[Biomedical Device Station & Real-Time Waveform]
+        UI_Doc[Doctor Triage Dashboard & Clinical Alert Queue]
+        UI_Adm[Admin Governance, Audit Trail & MPI Explorer]
+        UI_Bridges[Client Protocol Adapters<br/>WebBluetooth GATT | WebSerial CDC | WebSocket]
     end
 
-    subgraph Gateway ["Application & API Layer (FastAPI + Python 3.12)"]
+    subgraph Gateway ["Application & API Gateway Layer (FastAPI + Python 3.12)"]
         API_Auth[Auth Router & JWT Bearer Security]
-        API_Vitals[VitalSense & Telemetry Router]
-        API_AI[AI Document & Diagnostic Pipelines]
-        API_Clin[Appointments, Encounters, Labs]
-        API_Gov[Audit Logs & MPI Router]
+        API_Dev[Device Management & Telemetry Router /api/v1/devices]
+        API_Vitals[VitalSense & Telemetry Router /api/v1/vitals]
+        API_AI[AI Diagnostic & Document Pipelines]
+        API_Clin[Appointments, Encounters, Labs Router]
+        API_Gov[Audit Logs & Master Patient Index Router]
     end
 
-    subgraph Logic ["Business Logic & Clinical Engines"]
-        ENG_AHA[AHA/ADA Vitals Evaluator & MAP]
-        ENG_Alert[Clinical Safety & Stale Alert Engine]
-        ENG_Doc[OCR Sanitizer & Anti-Injection Guard]
-        ENG_KB[Drug-Drug Interaction Knowledge Base]
-        ENG_AI[Google Gemini 2.5 Pro / Fallback]
+    subgraph Logic ["Business Logic, Signal Processing & Clinical Engines"]
+        ENG_SQI[Signal Quality Indexing SQI & Perfusion Filter<br/>AC/DC Ratio, Motion Artifact, Contact Force Bounds]
+        ENG_Prov[Cryptographic Packet Hasher & Provenance Guard<br/>SHA-256 Hash, Sensor Truth Audit]
+        ENG_AHA[AHA/ADA Vitals Evaluator & MAP Engine<br/>Mean Arterial Pressure & Stage 1-2 HTN Bounds]
+        ENG_Alert[Clinical Safety & Stale Alert Generator]
+        ENG_Doc[OCR Sanitizer & Anti-Prompt-Injection Shield]
+        ENG_KB[Deterministic Drug-Drug Interaction KB]
+        ENG_AI[Google Gemini 2.5 Pro Generative Clinical Engine]
     end
 
     subgraph Data ["Data & Persistence Layer"]
         ORM[SQLAlchemy 2.0 Async ORM]
         DB_PG[(PostgreSQL + pgvector / SQLite Fallback)]
-        FS[Secure Local Encrypted Upload Storage]
+        DB_Telemetry[(Raw High-Frequency Telemetry & Packet Hashes)]
+        DB_Clinical[(Clinical Records, Vitals & Alerts)]
+        FS[Encrypted Local Medical Report Storage]
     end
 
-    subgraph Infrastructure ["Deployment Layer (Docker on Render.com)"]
-        Render_Proxy[Render Reverse Proxy / TLS Termination]
+    subgraph Infrastructure ["Cloud Infrastructure (Docker on Render.com)"]
+        Render_Proxy[Render Reverse Proxy / TLS 1.3 Termination]
         Uvicorn_App[Uvicorn ASGI Container Process]
     end
 
+    HW_PPG & HW_BP & HW_CGM & HW_Aux --> UI_Bridges
     Users --> Presentation
+    UI_Bridges --> UI_Dev
     Presentation --> Gateway
     Gateway --> Logic
     Logic --> Data
     Infrastructure --> Gateway
+

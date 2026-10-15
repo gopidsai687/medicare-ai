@@ -142,3 +142,50 @@ Every entry written to the `vital_signs` table is stamped with rigorous provenan
   - `experimental_webcam_rppg`: Ingested from the client-side optical pulse research tool.
   - `sample_data`: Ingested via demo bench simulation.
 - `is_patient_entered` (Boolean): Differentiates self-reported patient telemetry from clinician measurements recorded during hospital encounters.
+
+---
+
+## 4. Biomedical Sensor Telemetry Ingestion & Signal Quality Indexing (SQI)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Patient as Patient / Wearer
+    participant Sensor as Optical PPG Sensor (660nm/940nm)
+    participant Driver as Client Driver (WebSerial / WebBluetooth)
+    participant UI as Device Station UI
+    participant DevAPI as Device Router (/api/v1/devices)
+    participant SQIEng as Signal Quality & Perfusion Filter
+    participant ProvEng as Cryptographic Hasher (SHA-256)
+    participant VitAPI as Vitals Router (/api/v1/vitals)
+    participant DB as Database (device_telemetry_packets & vital_signs)
+
+    Patient->>Sensor: Places fingertip on optical aperture
+    Sensor->>Sensor: Measures Red/IR absorption & Contact Load (0.8N)
+    Sensor->>Driver: Raw UART / BLE GATT stream (115200 baud, 100 Hz)
+    Driver->>UI: Dispatches binary frame (AC/DC peak-to-peak)
+    UI->>UI: Plots real-time plethysmograph waveform & SNR HUD
+    UI->>DevAPI: POST /api/v1/devices/telemetry/ingest {device_id, hr: 72, spo2: 98.4, force: 0.8N}
+    
+    DevAPI->>SQIEng: validate_signal_quality(packet)
+    Note over SQIEng: Verifies SNR > 25dB, Contact Force 0.3-2.5N<br/>Confirms Perfusion Index = 2.1% (OPTIMAL)
+    SQIEng-->>DevAPI: Signal Quality Approved: OPTIMAL
+    
+    DevAPI->>ProvEng: compute_packet_hash(device_id, timestamp, payload)
+    ProvEng-->>DevAPI: SHA-256 Digest: 8f3c7... (Tamper-Proof)
+    
+    DevAPI->>DB: INSERT into device_telemetry_packets (provenance='MEASURED_DEVICE', hash=...)
+    DevAPI->>VitAPI: Forward verified biometrics to longitudinal engine
+    VitAPI->>DB: INSERT into vital_signs (heart_rate=72, spo2=98.4, source='biomedical_sensor')
+    DB-->>DevAPI: Transactions committed
+    
+    DevAPI-->>UI: HTTP 201 Created {status: 'VALID', hash: '8f3c7...', provenance: 'MEASURED_DEVICE'}
+    UI-->>Patient: Real-time HUD updates with green quality badge & live biometrics
+```
+
+### Signal Validation & Provenance Verification:
+1. **Signal-to-Noise Ratio (SNR):** The sensor pipeline rejects readings where SNR < 25 dB, flagging poor photodiode alignment or excessive ambient light leakage.
+2. **Contact Pressure Bounds:** Enforces 0.3 N to 2.5 N contact force to prevent capillary occlusion (from pressing too hard) or signal dropouts (from insufficient contact).
+3. **Perfusion Index (PI):** Evaluates pulsatile (AC) to non-pulsatile (DC) infrared absorption. Signals below 0.2% are classified as `POOR_PERFUSION`.
+4. **Cryptographic Integrity:** Ingested packets receive a unique SHA-256 hash calculated across `device_id`, `packet_timestamp`, and the biometric payload to guarantee auditability under HIPAA §164.312(c)(1).
+

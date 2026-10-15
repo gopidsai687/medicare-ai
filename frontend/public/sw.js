@@ -5,7 +5,7 @@
  * Resilient deployment rule: Never cache index.html or navigate requests to prevent stale chunk errors.
  */
 
-const CACHE_NAME = 'medicare-shell-v2';
+const CACHE_NAME = 'medicare-shell-v3';
 const STATIC_ASSETS = [
   '/manifest.webmanifest',
   '/favicon.svg',
@@ -40,11 +40,11 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event — Network-First for Navigation & APIs; Cache only static media
+// Fetch Event — Network-First for Navigation & APIs; Cache only static media (Never chunks)
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Never cache navigation requests, HTML files, APIs, auth tokens, or uploads
+  // 1. Never cache navigation requests, HTML files, APIs, auth tokens, uploads, or dynamic JS/CSS chunks
   if (
     event.request.mode === 'navigate' ||
     url.pathname === '/' ||
@@ -52,11 +52,13 @@ self.addEventListener('fetch', (event) => {
     url.pathname.endsWith('.html') ||
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/uploads/') ||
+    url.pathname.startsWith('/assets/') ||
     event.request.method !== 'GET' ||
     event.request.headers.has('Authorization')
   ) {
-    return; // Pass directly to network
+    return; // Pass directly to network / native browser cache
   }
+
 
   // 2. Static shell assets: Stale-While-Revalidate with error bypass
   event.respondWith(
