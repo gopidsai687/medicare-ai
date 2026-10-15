@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   FileText,
   Upload,
@@ -29,6 +30,7 @@ import {
 } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TYPES
@@ -148,6 +150,8 @@ NOTE: Fasting status confirmed (12 hours). Patient advised to follow up regardin
 
 export default function MedicalReportAnalysis() {
   const { user } = useAuth()
+  const location = useLocation()
+  const routeReportId = (location.state as any)?.reportId
   const fileInputRef = useRef<HTMLInputElement>(null)
   const chatScrollRef = useRef<HTMLDivElement>(null)
 
@@ -195,6 +199,24 @@ export default function MedicalReportAnalysis() {
   useEffect(() => {
     fetchReportsHistory()
   }, [fetchReportsHistory])
+
+  useEffect(() => {
+    if (routeReportId) {
+      async function loadReportFromRoute() {
+        try {
+          const res = await api.get(`/api/v1/medical-report-analysis/reports/${routeReportId}`)
+          if (res.data) {
+            setCurrentReport(res.data)
+            setUploadStatus('complete')
+            setActiveTab('analyzer')
+          }
+        } catch (err) {
+          console.warn('Could not load specific report from route state:', err)
+        }
+      }
+      loadReportFromRoute()
+    }
+  }, [routeReportId])
 
   /* ── Load Chat History When Report Changes ────────────────────────────── */
   useEffect(() => {
@@ -1074,10 +1096,13 @@ export default function MedicalReportAnalysis() {
                           border: msg.is_emergency
                             ? '1px solid rgba(244,63,94,0.4)'
                             : '1px solid rgba(255,255,255,0.06)',
-                          whiteSpace: 'pre-wrap',
                         }}
                       >
-                        {msg.content}
+                        {msg.role === 'patient' ? (
+                          <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                        ) : (
+                          <MarkdownRenderer content={msg.content} />
+                        )}
                       </div>
                     ))
                   )}

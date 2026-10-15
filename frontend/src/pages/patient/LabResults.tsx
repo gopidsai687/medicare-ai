@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import {
   FlaskConical,
@@ -74,6 +75,7 @@ const LAB_PANELS: LabPanel[] = [
 ]
 
 export default function PatientLabResults() {
+  const navigate = useNavigate()
   const { success } = useToast()
   const [panels, setPanels] = useState<LabPanel[]>(LAB_PANELS)
   const [selectedPanelId, setSelectedPanelId] = useState<string>(LAB_PANELS[0].id)
@@ -132,12 +134,20 @@ export default function PatientLabResults() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => success('Download started', 'Your official lab report PDF is being generated.')}
-          className="btn-primary inline-flex items-center gap-2"
-        >
-          <Download size={15} /> Download Official Lab Report
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/patient/reports')}
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <FlaskConical size={15} /> Analyze with AI Analyzer
+          </button>
+          <button
+            onClick={() => success('Download started', 'Your official lab report PDF is being generated.')}
+            className="btn-primary inline-flex items-center gap-2 cursor-pointer"
+          >
+            <Download size={15} /> Download Official Lab Report
+          </button>
+        </div>
       </div>
 
       {/* Panel Selection Tabs */}

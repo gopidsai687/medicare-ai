@@ -68,14 +68,24 @@ class AIService:
                 import google.generativeai as genai  # type: ignore
                 genai.configure(api_key=self.api_key)
                 self._genai = genai
-                self._chat_model = genai.GenerativeModel(
-                    self.model_name,
-                    generation_config=genai.types.GenerationConfig(
-                        max_output_tokens=settings.GEMINI_MAX_TOKENS,
-                        temperature=0.3,
-                        top_p=0.9,
-                    ),
-                )
+                candidate_models = [self.model_name, "gemini-1.5-flash", "gemini-2.0-flash", "gemini-1.5-pro"]
+                configured_model = None
+                for cand in candidate_models:
+                    try:
+                        configured_model = genai.GenerativeModel(
+                            cand,
+                            generation_config=genai.types.GenerationConfig(
+                                max_output_tokens=settings.GEMINI_MAX_TOKENS,
+                                temperature=0.3,
+                                top_p=0.9,
+                            ),
+                        )
+                        self.model_name = cand
+                        break
+                    except Exception:
+                        continue
+
+                self._chat_model = configured_model
                 log.info("Gemini AI client initialised", model=self.model_name)
             except Exception as exc:
                 log.warning("Failed to configure Gemini client", error=str(exc))

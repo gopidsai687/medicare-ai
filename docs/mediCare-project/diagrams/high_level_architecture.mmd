@@ -1,0 +1,46 @@
+graph TB
+    subgraph Users ["User Layer"]
+        P[Patient Users]
+        D[Clinicians & Doctors]
+        A[Hospital Administrators]
+    end
+
+    subgraph Presentation ["Presentation Layer (React 18 + Vite + Tailwind CSS)"]
+        UI_Login[Authentication & Session Guards]
+        UI_Pat[Patient Portal & VitalSense HUD]
+        UI_Doc[Doctor Triage & Alert Queue]
+        UI_Adm[Admin Governance & Audit Trail]
+    end
+
+    subgraph Gateway ["Application & API Layer (FastAPI + Python 3.12)"]
+        API_Auth[Auth Router & JWT Bearer Security]
+        API_Vitals[VitalSense & Telemetry Router]
+        API_AI[AI Document & Diagnostic Pipelines]
+        API_Clin[Appointments, Encounters, Labs]
+        API_Gov[Audit Logs & MPI Router]
+    end
+
+    subgraph Logic ["Business Logic & Clinical Engines"]
+        ENG_AHA[AHA/ADA Vitals Evaluator & MAP]
+        ENG_Alert[Clinical Safety & Stale Alert Engine]
+        ENG_Doc[OCR Sanitizer & Anti-Injection Guard]
+        ENG_KB[Drug-Drug Interaction Knowledge Base]
+        ENG_AI[Google Gemini 2.5 Pro / Fallback]
+    end
+
+    subgraph Data ["Data & Persistence Layer"]
+        ORM[SQLAlchemy 2.0 Async ORM]
+        DB_PG[(PostgreSQL + pgvector / SQLite Fallback)]
+        FS[Secure Local Encrypted Upload Storage]
+    end
+
+    subgraph Infrastructure ["Deployment Layer (Docker on Render.com)"]
+        Render_Proxy[Render Reverse Proxy / TLS Termination]
+        Uvicorn_App[Uvicorn ASGI Container Process]
+    end
+
+    Users --> Presentation
+    Presentation --> Gateway
+    Gateway --> Logic
+    Logic --> Data
+    Infrastructure --> Gateway

@@ -14,26 +14,30 @@ import structlog
 from fastapi import HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from webauthn import (
-    generate_authentication_options,
-    generate_registration_options,
-    verify_authentication_response,
-    verify_registration_response,
-)
-from webauthn.helpers import (
-    base64url_to_bytes,
-    bytes_to_base64url,
-    options_to_json,
-)
-from webauthn.helpers.structs import (
-    AttestationConveyancePreference,
-    AuthenticationCredential,
-    AuthenticatorSelectionCriteria,
-    PublicKeyCredentialDescriptor,
-    RegistrationCredential,
-    ResidentKeyRequirement,
-    UserVerificationRequirement,
-)
+try:
+    from webauthn import (
+        generate_authentication_options,
+        generate_registration_options,
+        verify_authentication_response,
+        verify_registration_response,
+    )
+    from webauthn.helpers import (
+        base64url_to_bytes,
+        bytes_to_base64url,
+        options_to_json,
+    )
+    from webauthn.helpers.structs import (
+        AttestationConveyancePreference,
+        AuthenticationCredential,
+        AuthenticatorSelectionCriteria,
+        PublicKeyCredentialDescriptor,
+        RegistrationCredential,
+        ResidentKeyRequirement,
+        UserVerificationRequirement,
+    )
+    WEBAUTHN_AVAILABLE = True
+except ImportError:
+    WEBAUTHN_AVAILABLE = False
 
 from app.models.user import User
 from app.models.vital_sign import WebAuthnCredential, WebauthnChallenge
@@ -80,6 +84,11 @@ async def create_registration_options(
     Stores the challenge in webauthn_challenges table.
     """
     rp_id = get_rp_id(request)
+    if not WEBAUTHN_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passkey authentication is disabled. Please use standard email and password authentication."
+        )
 
     # Exclude credentials already registered for this user
     existing_stmt = select(WebAuthnCredential).where(WebAuthnCredential.user_id == user.id)
@@ -135,6 +144,11 @@ async def verify_registration(
     Verifies a WebAuthn registration response and registers the passkey public key.
     """
     rp_id = get_rp_id(request)
+    if not WEBAUTHN_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passkey authentication is disabled. Please use standard email and password authentication."
+        )
     allowed_origins = get_allowed_origins(request)
 
     # Retrieve challenge
@@ -232,6 +246,11 @@ async def create_authentication_options(
     If email is provided, populates allow_credentials with user's registered keys.
     """
     rp_id = get_rp_id(request)
+    if not WEBAUTHN_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passkey authentication is disabled. Please use standard email and password authentication."
+        )
     allow_credentials: Optional[List[PublicKeyCredentialDescriptor]] = None
     target_user_id: Optional[uuid.UUID] = None
 
@@ -284,6 +303,11 @@ async def verify_authentication(
     Returns (User, WebAuthnCredential).
     """
     rp_id = get_rp_id(request)
+    if not WEBAUTHN_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Passkey authentication is disabled. Please use standard email and password authentication."
+        )
     allowed_origins = get_allowed_origins(request)
 
     # Retrieve challenge

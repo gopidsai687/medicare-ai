@@ -330,12 +330,12 @@ export default function PreviousAnalyses() {
                 <button
                   onClick={() => {
                     if (item.type === 'prescription') {
-                      navigate('/patient/prescriptions')
+                      navigate('/patient/prescriptions', { state: { reportId: item.id } })
                     } else {
-                      navigate('/patient/reports')
+                      navigate('/patient/reports', { state: { reportId: item.id } })
                     }
                   }}
-                  className="btn-primary"
+                  className="btn-primary cursor-pointer hover:shadow-lg transition-all"
                   style={{ fontSize: '0.78rem', padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}
                 >
                   <span>Open Analysis</span>

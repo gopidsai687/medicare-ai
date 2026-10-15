@@ -158,10 +158,13 @@ from fastapi import HTTPException
 
 dist_candidates = [
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "static")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
+    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist")),
+    "/app/backend/static",
+    "/app/static",
+    "/app/frontend/dist",
     os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "static")),
     os.path.abspath("static"),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "frontend", "dist")),
-    os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "frontend", "dist")),
     os.path.abspath("frontend/dist"),
     os.path.abspath("../frontend/dist"),
 ]
@@ -178,11 +181,21 @@ if frontend_dist:
     if os.path.exists(assets_path):
         app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
 
+    NO_CACHE_HEADERS = {
+        "Cache-Control": "no-cache, no-store, must-revalidate, max-age=0",
+        "Pragma": "no-cache",
+        "Expires": "0",
+    }
+
     @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_spa(full_path: str):
         if full_path.startswith("api/") or full_path == "api":
             raise HTTPException(status_code=404, detail="API route not found")
         file_path = os.path.join(frontend_dist, full_path)
         if os.path.isfile(file_path):
+            if full_path == "sw.js" or full_path.endswith(".html"):
+                return FileResponse(file_path, headers=NO_CACHE_HEADERS)
+            elif full_path.startswith("assets/"):
+                return FileResponse(file_path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
             return FileResponse(file_path)
-        return FileResponse(os.path.join(frontend_dist, "index.html"))
+        return FileResponse(os.path.join(frontend_dist, "index.html"), headers=NO_CACHE_HEADERS)

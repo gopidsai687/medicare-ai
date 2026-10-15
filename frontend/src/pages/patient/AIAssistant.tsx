@@ -17,6 +17,7 @@ import {
 } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 
 interface Message {
   id: string
@@ -241,9 +242,13 @@ export default function PatientAIAssistant() {
                         : 'bg-white/5 border border-white/10 text-slate-200 rounded-tl-none'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap font-sans">
-                      {msg.content}
-                    </div>
+                    {msg.role === 'assistant' ? (
+                      <MarkdownRenderer content={msg.content} />
+                    ) : (
+                      <div className="whitespace-pre-wrap font-sans">
+                        {msg.content}
+                      </div>
+                    )}
 
                     <div
                       className={`flex items-center justify-between pt-2 border-t text-[10px] ${

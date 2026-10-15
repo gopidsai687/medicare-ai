@@ -1,0 +1,34 @@
+sequenceDiagram
+    autonumber
+    actor Patient as Patient
+    participant UI as VitalSense UI
+    participant API as Vitals Router (/api/v1/vitals)
+    participant Evaluator as Clinical Guideline Evaluator
+    participant AlertEng as Clinical Alert Engine
+    participant DB as Database (vital_signs & vital_alerts)
+    actor Doctor as Clinician / Doctor
+
+    Patient->>UI: Enters BP (145/92 mmHg) & Pulse (78 BPM)
+    UI->>UI: Validates physiologic bounds (60-260 SBP, 40-160 DBP)
+    UI->>API: POST /api/v1/vitals/blood-pressure {source: 'manual_home_cuff'}
+    API->>Evaluator: Compute MAP and classify AHA category
+    Note over Evaluator: MAP = 92 + (145-92)/3 = 109.7 mmHg<br/>Category: Hypertension Stage 2
+    API->>AlertEng: evaluate_vital_reading(reading_data)
+    AlertEng-->>API: High-Priority Clinical Alert Flagged
+    API->>DB: INSERT into vital_signs (is_sample=false, source='manual_home_cuff')
+    API->>DB: INSERT into vital_alerts (severity='WARNING', status='ACTIVE')
+    DB-->>API: Records persisted successfully
+    API-->>UI: HTTP 201 Created {vital_id, map: 109.7, category: 'Stage 2'}
+    UI-->>Patient: Displays longitudinal chart point & cautionary banner
+    
+    rect rgb(20, 30, 45)
+    Note over Doctor,DB: Asynchronous Clinician Triage Workflow
+    Doctor->>API: GET /api/v1/vitals/doctor/alerts
+    API->>DB: SELECT active alerts JOIN vital_signs
+    DB-->>API: Returns active Stage 2 HTN alert
+    API-->>Doctor: Alert queue populated with patient record
+    Doctor->>API: POST /api/v1/vitals/alerts/{id}/action {note: 'Dose adjustment review'}
+    API->>DB: UPDATE vital_alerts SET status='RESOLVED', actioned_by=doctor_id
+    DB-->>API: Updated
+    API-->>Doctor: Alert dismissed with timestamped audit confirmation
+    end

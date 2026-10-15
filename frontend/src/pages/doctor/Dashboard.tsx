@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Users, Calendar, Stethoscope, TrendingUp, ArrowRight, Clock } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import api from '@/lib/api'
 
 const stats = [
-  { label: 'Active Patients', value: '47', icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: '+3 this week' },
-  { label: "Today's Appointments", value: '8', icon: Calendar, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: '3 remaining' },
-  { label: 'Pending Lab Reviews', value: '12', icon: Stethoscope, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: '5 urgent' },
-  { label: 'Encounters This Month', value: '134', icon: TrendingUp, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: '+18 vs last month' },
+  { label: 'Active Patients', value: '47', icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: '+3 this week', path: '/doctor/patients' },
+  { label: "Today's Appointments", value: '8', icon: Calendar, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: '3 remaining', path: '/doctor/schedule' },
+  { label: 'Pending Lab Reviews', value: '12', icon: Stethoscope, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: '5 urgent', path: '/doctor/labs' },
+  { label: 'Encounters This Month', value: '134', icon: TrendingUp, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: '+18 vs last month', path: '/doctor/encounters' },
 ]
 
 const todayAppointments = [
@@ -19,14 +20,15 @@ const todayAppointments = [
 ]
 
 const pendingItems = [
-  { label: 'Lab results to review', count: 5, color: '#f59e0b', urgent: true },
-  { label: 'Prescriptions to sign', count: 3, color: '#3182f4', urgent: false },
-  { label: 'Patient messages', count: 7, color: '#14b8a6', urgent: false },
-  { label: 'Referral requests', count: 2, color: '#34d399', urgent: false },
+  { label: 'Lab results to review', count: 5, color: '#f59e0b', urgent: true, path: '/doctor/labs' },
+  { label: 'Prescriptions to sign', count: 3, color: '#3182f4', urgent: false, path: '/doctor/ai' },
+  { label: 'Patient messages', count: 7, color: '#14b8a6', urgent: false, path: '/doctor/patients' },
+  { label: 'Referral requests', count: 2, color: '#34d399', urgent: false, path: '/doctor/encounters' },
 ]
 
 export default function DoctorDashboard() {
   const { user } = useAuth()
+  const navigate = useNavigate()
   const [appointmentsList, setAppointmentsList] = useState(todayAppointments)
   const [dashboardStats, setDashboardStats] = useState(stats)
   const [isLive, setIsLive] = useState(false)
@@ -57,10 +59,10 @@ export default function DoctorDashboard() {
           ? labsRes.value.data.length : 12
 
         setDashboardStats([
-          { label: 'Active Patients', value: '47', icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: '+3 this week' },
-          { label: "Today's Appointments", value: String(apptCount), icon: Calendar, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: 'Live schedule' },
-          { label: 'Pending Lab Reviews', value: String(labCount), icon: Stethoscope, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: 'Diagnostic queue' },
-          { label: 'Encounters This Month', value: '134', icon: TrendingUp, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: '+18 vs last month' },
+          { label: 'Active Patients', value: '47', icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: '+3 this week', path: '/doctor/patients' },
+          { label: "Today's Appointments", value: String(apptCount), icon: Calendar, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: 'Live schedule', path: '/doctor/schedule' },
+          { label: 'Pending Lab Reviews', value: String(labCount), icon: Stethoscope, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: 'Diagnostic queue', path: '/doctor/labs' },
+          { label: 'Encounters This Month', value: '134', icon: TrendingUp, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: '+18 vs last month', path: '/doctor/encounters' },
         ])
       } catch (err) {
         console.warn('Doctor dashboard stats fallback:', err)
@@ -88,12 +90,18 @@ export default function DoctorDashboard() {
 
       {/* Stats */}
       <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        {dashboardStats.map(({ label, value, icon: Icon, color, bg, trend }) => (
-          <div key={label} className="stat-card animate-fade-in-up">
+        {dashboardStats.map(({ label, value, icon: Icon, color, bg, trend, path }) => (
+          <div
+            key={label}
+            onClick={() => path && navigate(path)}
+            className="stat-card animate-fade-in-up cursor-pointer hover:border-blue-500/50 hover:scale-[1.02] transition-all group"
+            title={`View ${label}`}
+          >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
               <div style={{ width: 38, height: 38, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon size={18} style={{ color }} />
               </div>
+              <ArrowRight size={14} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
             </div>
             <div style={{ fontSize: '1.75rem', fontWeight: 700, color: '#e2eaf4', lineHeight: 1, marginBottom: 4 }}>{value}</div>
             <div style={{ fontSize: '0.8rem', color: '#5a7a9e', marginBottom: 6 }}>{label}</div>
@@ -109,11 +117,23 @@ export default function DoctorDashboard() {
             <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: 0 }}>
               Today's Schedule
             </h2>
-            <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: '0.75rem' }}>Full Schedule</button>
+            <button
+              onClick={() => navigate('/doctor/schedule')}
+              className="btn-secondary cursor-pointer hover:bg-slate-700/50 transition-colors"
+              style={{ padding: '6px 14px', fontSize: '0.75rem' }}
+            >
+              Full Schedule
+            </button>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {appointmentsList.map((a) => (
-              <div key={a.patient + a.time} className="glass-sm" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 14 }}>
+              <div
+                key={a.patient + a.time}
+                onClick={() => navigate('/doctor/schedule')}
+                className="glass-sm cursor-pointer hover:border-blue-500/30 hover:bg-white/[0.02] transition-all"
+                style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 14 }}
+                title="View in schedule"
+              >
                 <div style={{ textAlign: 'center', minWidth: 60 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#5a7a9e', fontSize: '0.78rem' }}>
                     <Clock size={11} />{a.time}
@@ -135,8 +155,14 @@ export default function DoctorDashboard() {
             Action Required
           </h2>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {pendingItems.map(({ label, count, color, urgent }) => (
-              <div key={label} className="glass-sm" style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }}>
+            {pendingItems.map(({ label, count, color, urgent, path }) => (
+              <div
+                key={label}
+                onClick={() => path && navigate(path)}
+                className="glass-sm cursor-pointer hover:border-slate-600 hover:bg-white/[0.03] transition-all group"
+                style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}
+                title={`Open ${label}`}
+              >
                 <div style={{ width: 36, height: 36, borderRadius: 8, background: `${color}15`,
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   fontWeight: 700, fontSize: '0.9rem', color, flexShrink: 0 }}>
@@ -146,7 +172,7 @@ export default function DoctorDashboard() {
                   <div style={{ fontSize: '0.8rem', color: '#c0d4ed' }}>{label}</div>
                   {urgent && <div style={{ fontSize: '0.68rem', color: '#fb7185', marginTop: 1 }}>⚠ Urgent</div>}
                 </div>
-                <ArrowRight size={13} style={{ color: '#3a5070' }} />
+                <ArrowRight size={13} className="text-slate-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
               </div>
             ))}
           </div>

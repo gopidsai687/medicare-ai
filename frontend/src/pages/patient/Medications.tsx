@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import {
   Activity,
@@ -84,6 +85,7 @@ const INITIAL_MEDICATIONS: Medication[] = [
 ]
 
 export default function PatientMedications() {
+  const navigate = useNavigate()
   const [medications, setMedications] = useState<Medication[]>(INITIAL_MEDICATIONS)
   const [selectedMed, setSelectedMed] = useState<Medication | null>(null)
   const [isRefillModalOpen, setIsRefillModalOpen] = useState(false)
@@ -174,6 +176,14 @@ export default function PatientMedications() {
               </span>
             )}
           </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate('/patient/prescriptions')}
+            className="btn-primary inline-flex items-center gap-2 cursor-pointer"
+          >
+            <Pill size={16} /> Analyze New Prescription
+          </button>
         </div>
       </div>
 

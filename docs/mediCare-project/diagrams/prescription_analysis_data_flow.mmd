@@ -1,0 +1,31 @@
+sequenceDiagram
+    autonumber
+    actor Patient as Patient (Browser)
+    participant Client as Frontend Axios Client
+    participant Router as FastAPI Router (/api/v1/prescriptions)
+    participant Pipe as PrescriptionPipeline
+    participant Sanitizer as Prompt Injection Guard
+    participant Extractor as pypdf / OCR Engine
+    participant KB as Medical Knowledge Service
+    participant AI as Gemini 2.5 Pro / Fallback
+    participant DB as Database (SQLAlchemy)
+
+    Patient->>Client: Selects prescription PDF/Image & clicks Analyze
+    Client->>Router: POST /api/v1/prescriptions/upload (multipart/form-data)
+    Router->>Pipe: validate_file_upload(file_bytes, filename)
+    Pipe-->>Router: Magic bytes verified (%PDF-, PNG, JPEG, <= 10MB)
+    Router->>Extractor: extract_text_from_file(file_bytes)
+    Extractor-->>Pipe: Raw extracted clinical text
+    Pipe->>Sanitizer: sanitize_ocr_text(raw_text)
+    Sanitizer-->>Pipe: Cleaned text ([REDACTED_INJECTION_PATTERN])
+    Pipe->>Pipe: extract_entities_regex(cleaned_text)
+    Note over Pipe: Extracts: Drug Name, Dosage, Frequency, Route
+    Pipe->>KB: check_drug_interactions(extracted_drugs, patient_active_meds)
+    KB-->>Pipe: Interaction assessment (Severity, Rationale, Guidance)
+    Pipe->>AI: generate_plain_language_summary(clinical_entities)
+    AI-->>Pipe: Structured patient guidance & red flag warnings
+    Pipe->>DB: Persist PrescriptionUpload & ExtractedMedication records
+    DB-->>Pipe: Record UUIDs confirmed
+    Pipe-->>Router: Complete JSON analysis payload
+    Router-->>Client: HTTP 200 OK with structured prescription analysis
+    Client-->>Patient: Displays interactive dosage card, explanation, and warnings

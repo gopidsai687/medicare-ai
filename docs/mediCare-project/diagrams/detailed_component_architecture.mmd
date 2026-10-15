@@ -1,0 +1,50 @@
+graph LR
+    subgraph Frontend ["React SPA Frontend"]
+        Router[React Router v6]
+        AuthCtx[Auth Context & State Store]
+        AxiosClient[Axios API Client with 15s Timeout]
+        
+        subgraph Views ["Client Views"]
+            V_Vital[VitalSense & Digital Twin HUD]
+            V_Presc[Prescription Analysis UI]
+            V_Report[Medical Report Analysis UI]
+            V_DocAlert[Doctor Alert Queue UI]
+            V_Audit[Admin Audit Log UI]
+        end
+    end
+
+    subgraph Backend ["FastAPI Application (app.main:app)"]
+        Middleware[CORS & TrustedHost Middleware]
+        Lifespan[Lifespan Startup & Schema Inspector]
+        
+        subgraph Routers ["API v1 Routers"]
+            R_Auth["/api/v1/auth"]
+            R_Vitals["/api/v1/vitals"]
+            R_Presc["/api/v1/prescriptions"]
+            R_Report["/api/v1/medical-reports"]
+            R_Devices["/api/v1/devices"]
+            R_Audit["/api/v1/audit-logs"]
+        end
+
+        subgraph CoreServices ["Core Clinical Services"]
+            S_AI[AIService - Gemini 2.5 Pro]
+            S_PrescPipe[PrescriptionPipeline - pypdf & OCR]
+            S_ReportPipe[MedicalReportPipeline - 37 Term Dict]
+            S_Alert[AlertEngine - Clinical Safety Bounds]
+            S_KB[MedicalKnowledge - Interaction Pairs]
+        end
+    end
+
+    subgraph Database ["Database Layer"]
+        Models[SQLAlchemy 2.0 Async Models]
+        ConnPool[Async Engine Connection Pool]
+        Schema[(PostgreSQL / SQLite medicare.db)]
+    end
+
+    Views --> AxiosClient
+    AxiosClient --> Middleware
+    Middleware --> Routers
+    Routers --> CoreServices
+    CoreServices --> Models
+    Models --> ConnPool
+    ConnPool --> Schema

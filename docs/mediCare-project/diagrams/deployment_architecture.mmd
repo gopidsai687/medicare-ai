@@ -1,0 +1,43 @@
+graph TB
+    subgraph ClientEnvironments ["Client Edge"]
+        Browser[Modern Web Browser - Chrome, Edge, Safari, Firefox]
+        PWA[Progressive Web App - Service Worker + Manifest]
+    end
+
+    subgraph RenderCloud ["Render.com Cloud Infrastructure"]
+        EdgeProxy["Render HTTPS Reverse Proxy (TLS 1.3, port 443)"]
+        
+        subgraph DockerContainer ["Multi-Stage Docker Container (Debian Slim)"]
+            Port["Container Port :10000 ($PORT)"]
+            Uvicorn["Uvicorn ASGI Server (app.main:app)"]
+            FastAPI["FastAPI Web Framework"]
+            StaticMount["StaticFiles Mount (/assets & SPA Fallback)"]
+            
+            subgraph EmbeddedBundle ["Pre-Compiled React Assets"]
+                HTML["index.html"]
+                JSBundles["Vite JS Chunks (index, LoginPage, VitalSense)"]
+                CSS["Tailwind CSS Bundle"]
+            end
+            
+            subgraph RuntimeStorage ["Container Local Storage"]
+                SQLiteDB[("medicare.db (aiosqlite Async Engine)")]
+                UploadsDir["/app/backend/uploads/"]
+            end
+        end
+
+        subgraph ManagedServices ["External Managed Services"]
+            PostgresDB[("Managed PostgreSQL + pgvector (Optional Target)")]
+            GeminiAPI["Google Gemini Generative AI API"]
+        end
+    end
+
+    Browser -->|HTTPS / WSS| EdgeProxy
+    PWA -->|HTTPS| EdgeProxy
+    EdgeProxy -->|HTTP Proxy| Port
+    Port --> Uvicorn
+    Uvicorn --> FastAPI
+    FastAPI --> StaticMount
+    StaticMount --> EmbeddedBundle
+    FastAPI -->|Async SQLAlchemy| SQLiteDB
+    FastAPI -.->|Production Target| PostgresDB
+    FastAPI -->|REST API Key| GeminiAPI

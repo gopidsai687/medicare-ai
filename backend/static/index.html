@@ -16,8 +16,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
     <title>MediCare AI — Healthcare Management Platform</title>
-    <script type="module" crossorigin src="/assets/index-Ix3KBKl5.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B0d9Y_eN.css">
+    <script type="module" crossorigin src="/assets/index-BNEtN8Kt.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-DT94NDlZ.css">
   </head>
   <body>
     <div id="root"></div>
@@ -25,7 +25,20 @@
       if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
         window.addEventListener('load', () => {
           navigator.serviceWorker.register('/sw.js').then(
-            (reg) => { console.log('MediCare PWA ServiceWorker registered with scope:', reg.scope); },
+            (reg) => {
+              console.log('MediCare PWA ServiceWorker registered with scope:', reg.scope);
+              reg.addEventListener('updatefound', () => {
+                const newWorker = reg.installing;
+                if (newWorker) {
+                  newWorker.addEventListener('statechange', () => {
+                    if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                      console.log('[SW] New version available, reloading clients.');
+                      window.location.reload();
+                    }
+                  });
+                }
+              });
+            },
             (err) => { console.log('MediCare ServiceWorker registration failed:', err); }
           );
         });

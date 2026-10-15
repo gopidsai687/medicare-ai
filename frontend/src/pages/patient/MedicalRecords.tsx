@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import {
   FileText,
@@ -102,6 +103,7 @@ const INITIAL_RECORDS: MedicalRecordItem[] = [
 ]
 
 export default function PatientMedicalRecords() {
+  const navigate = useNavigate()
   const { success } = useToast()
   const [records, setRecords] = useState<MedicalRecordItem[]>(INITIAL_RECORDS)
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
@@ -444,7 +446,17 @@ export default function PatientMedicalRecords() {
               )}
             </div>
 
-            <div className="flex justify-end pt-3 border-t border-white/10">
+            <div className="flex items-center justify-between pt-3 border-t border-white/10">
+              <button
+                type="button"
+                onClick={() => {
+                  setSelectedRecord(null)
+                  navigate('/patient/reports')
+                }}
+                className="text-xs text-teal-400 hover:text-teal-300 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <FileText size={14} /> Analyze with AI Report Analyzer →
+              </button>
               <button
                 onClick={() => setSelectedRecord(null)}
                 className="btn-primary"

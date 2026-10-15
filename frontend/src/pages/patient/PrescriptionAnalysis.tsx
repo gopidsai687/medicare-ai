@@ -1,4 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
+import { useLocation } from 'react-router-dom'
 import {
   Upload,
   FileText,
@@ -33,6 +34,7 @@ import {
 } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuth } from '@/lib/auth'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TYPES
@@ -97,6 +99,8 @@ type WorkflowStep = 'upload' | 'verify' | 'analyzing' | 'results' | 'history'
    ═══════════════════════════════════════════════════════════════════════════ */
 export default function PrescriptionAnalysis() {
   const { user } = useAuth()
+  const location = useLocation()
+  const routeReportId = (location.state as any)?.reportId
 
   // Workflow state
   const [step, setStep] = useState<WorkflowStep>('upload')
@@ -369,6 +373,12 @@ export default function PrescriptionAnalysis() {
       setError('Could not load report.')
     }
   }
+
+  useEffect(() => {
+    if (routeReportId) {
+      viewHistoryReport(routeReportId)
+    }
+  }, [routeReportId])
 
   // ── Delete History Report ──────────────────────────────────────────────
   const handleDeleteReport = async (reportId: string, e?: React.MouseEvent) => {
@@ -1067,7 +1077,11 @@ export default function PrescriptionAnalysis() {
                           ? 'bg-rose-500/10 border border-rose-500/20 text-rose-200 mr-8'
                           : 'bg-white/5 border border-white/5 text-slate-200 mr-8'
                       }`}>
-                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                        {msg.role === 'patient' ? (
+                          <div className="whitespace-pre-wrap">{msg.content}</div>
+                        ) : (
+                          <MarkdownRenderer content={msg.content} />
+                        )}
                       </div>
                     ))}
                   </div>

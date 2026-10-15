@@ -6,7 +6,7 @@ import sys
 import re
 
 BASE = "https://medicare-ai-iv31.onrender.com"
-TARGET_COMMIT = "login-fix"
+TARGET_COMMIT = "0d485d7"
 EXPECTED_BUNDLE = "index-Ix3KBKl5"
 EXPECTED_CSS = "index-B0d9Y_eN"
 

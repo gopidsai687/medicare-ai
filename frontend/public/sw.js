@@ -1,13 +1,12 @@
 /**
- * MediCare AI — Service Worker
- * Provides offline application shell caching and Web Push Notification handling.
+ * MediCare AI — Service Worker (v2)
+ * Provides offline icon caching and Web Push Notification handling.
  * Strict privacy rule: Never cache private medical documents, JWT tokens, or clinical records.
+ * Resilient deployment rule: Never cache index.html or navigate requests to prevent stale chunk errors.
  */
 
-const CACHE_NAME = 'medicare-shell-v1';
+const CACHE_NAME = 'medicare-shell-v2';
 const STATIC_ASSETS = [
-  '/',
-  '/index.html',
   '/manifest.webmanifest',
   '/favicon.svg',
   '/icon-192.png',
@@ -15,22 +14,24 @@ const STATIC_ASSETS = [
   '/apple-touch-icon.png',
 ];
 
-// Install Event — Cache Application Shell
+// Install Event — Cache Static Icons only (Never HTML)
 self.addEventListener('install', (event) => {
+  self.skipWaiting();
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
       return cache.addAll(STATIC_ASSETS);
-    }).then(() => self.skipWaiting())
+    })
   );
 });
 
-// Activate Event — Cleanup Old Caches
+// Activate Event — Aggressively Purge Old Caches
 self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
           if (key !== CACHE_NAME) {
+            console.log('[SW] Deleting old cache:', key);
             return caches.delete(key);
           }
         })
@@ -39,12 +40,16 @@ self.addEventListener('activate', (event) => {
   );
 });
 
-// Fetch Event — Network-First for APIs, Cache-First for Shell Assets
+// Fetch Event — Network-First for Navigation & APIs; Cache only static media
 self.addEventListener('fetch', (event) => {
   const url = new URL(event.request.url);
 
-  // 1. Never cache API requests, auth tokens, uploads, or private documents
+  // 1. Never cache navigation requests, HTML files, APIs, auth tokens, or uploads
   if (
+    event.request.mode === 'navigate' ||
+    url.pathname === '/' ||
+    url.pathname === '/index.html' ||
+    url.pathname.endsWith('.html') ||
     url.pathname.startsWith('/api/') ||
     url.pathname.startsWith('/uploads/') ||
     event.request.method !== 'GET' ||
@@ -53,18 +58,20 @@ self.addEventListener('fetch', (event) => {
     return; // Pass directly to network
   }
 
-  // 2. Static shell assets: Stale-While-Revalidate
+  // 2. Static shell assets: Stale-While-Revalidate with error bypass
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      const fetchPromise = fetch(event.request).then((networkResponse) => {
-        if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
-          const responseToCache = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseToCache);
-          });
-        }
-        return networkResponse;
-      }).catch(() => cachedResponse);
+      const fetchPromise = fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200 && networkResponse.type === 'basic') {
+            const responseToCache = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          return networkResponse;
+        })
+        .catch(() => cachedResponse);
 
       return cachedResponse || fetchPromise;
     })
@@ -93,7 +100,6 @@ self.addEventListener('push', (event) => {
     }
   }
 
-  // Privacy protection: Ensure lock screen does not leak raw medical telemetry by default
   const options = {
     body: data.body,
     icon: data.icon || '/icon-192.png',

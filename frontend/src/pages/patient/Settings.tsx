@@ -433,7 +433,7 @@ export default function PatientSettings() {
                 <Smartphone size={18} className="text-purple-400 shrink-0" />
                 <div>
                   <span className="font-semibold text-white block">Two-Factor Authentication (2FA)</span>
-                  <span className="text-slate-400 text-[11px]">Require biometric or authenticator app passkey when signing in.</span>
+                  <span className="text-slate-400 text-[11px]">Require authenticator app verification code when signing in.</span>
                 </div>
               </div>
               <input

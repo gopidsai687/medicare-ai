@@ -17,6 +17,14 @@ from app.models.base import Base
 from app.models.user import User, UserRole
 from app.models.vital_sign import WebAuthnCredential, WebauthnChallenge
 
+try:
+    import webauthn
+    has_webauthn = True
+except ImportError:
+    has_webauthn = False
+
+pytestmark = pytest.mark.skipif(not has_webauthn, reason="Passkey authentication is disabled on this deployment.")
+
 
 @pytest.fixture(autouse=True)
 async def setup_test_db():

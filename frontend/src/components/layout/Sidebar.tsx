@@ -114,7 +114,7 @@ export function Sidebar() {
           <NavLink
             key={item.to}
             to={item.to}
-            end={item.to.split('/').length === 2}
+            end
             className={({ isActive }) => `sidebar-nav-item${isActive ? ' active' : ''}`}
           >
             <item.icon size={16} />

@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react'
-import { Users, Stethoscope, Calendar, Activity, TrendingUp, AlertTriangle, Settings, Shield, Brain, Pill, FileSearch, Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Users, Stethoscope, Calendar, Activity, TrendingUp, AlertTriangle, Settings, Shield, Brain, Pill, FileSearch, Loader2, ArrowRight } from 'lucide-react'
 import api from '@/lib/api'
 
 const stats = [
-  { label: 'Total Patients', value: '1,284', icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: '+24 this month' },
-  { label: 'Active Doctors', value: '38', icon: Stethoscope, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: '2 on leave' },
-  { label: "Today's Admissions", value: '14', icon: Calendar, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: '6 discharged' },
-  { label: 'Pending Duplicates', value: '3', icon: AlertTriangle, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: 'Needs review' },
+  { label: 'Total Patients', value: '1,284', icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: '+24 this month', path: '/admin/patients' },
+  { label: 'Active Doctors', value: '38', icon: Stethoscope, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: '2 on leave', path: '/admin/doctors' },
+  { label: "Today's Admissions", value: '14', icon: Calendar, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: '6 discharged', path: '/admin/appointments' },
+  { label: 'Pending Duplicates', value: '3', icon: AlertTriangle, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: 'Needs review', path: '/admin/patients' },
 ]
 
 const recentAdmissions = [
@@ -31,6 +32,7 @@ interface RxMetrics {
 }
 
 export default function AdminDashboard() {
+  const navigate = useNavigate()
   const [dashboardStats, setDashboardStats] = useState(stats)
   const [isLive, setIsLive] = useState(false)
   const [rxMetrics, setRxMetrics] = useState<RxMetrics | null>(null)
@@ -56,10 +58,10 @@ export default function AdminDashboard() {
           ? String(ptntsRes.value.data.total) : '1,284'
 
         setDashboardStats([
-          { label: 'Total Patients', value: ptntCount, icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: 'Enterprise census' },
-          { label: 'Active Doctors', value: String(docCount), icon: Stethoscope, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: 'Active credentialed' },
-          { label: "Today's Appointments", value: String(apptCount), icon: Calendar, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: 'Live system queue' },
-          { label: 'Pending Duplicates', value: String(dupsCount), icon: AlertTriangle, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: 'MPI review queue' },
+          { label: 'Total Patients', value: ptntCount, icon: Users, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', trend: 'Enterprise census', path: '/admin/patients' },
+          { label: 'Active Doctors', value: String(docCount), icon: Stethoscope, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', trend: 'Active credentialed', path: '/admin/doctors' },
+          { label: "Today's Appointments", value: String(apptCount), icon: Calendar, color: '#34d399', bg: 'rgba(52,211,153,0.1)', trend: 'Live system queue', path: '/admin/appointments' },
+          { label: 'Pending Duplicates', value: String(dupsCount), icon: AlertTriangle, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', trend: 'MPI review queue', path: '/admin/patients' },
         ])
         setIsLive(true)
       } catch (err) {
@@ -101,12 +103,18 @@ export default function AdminDashboard() {
 
       {/* Stats */}
       <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        {dashboardStats.map(({ label, value, icon: Icon, color, bg, trend }) => (
-          <div key={label} className="stat-card animate-fade-in-up">
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 14 }}>
+        {dashboardStats.map(({ label, value, icon: Icon, color, bg, trend, path }) => (
+          <div
+            key={label}
+            onClick={() => path && navigate(path)}
+            className="stat-card animate-fade-in-up cursor-pointer hover:border-blue-500/50 hover:scale-[1.02] transition-all group"
+            title={`View ${label}`}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14 }}>
               <div style={{ width: 38, height: 38, borderRadius: 10, background: bg, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 <Icon size={18} style={{ color }} />
               </div>
+              <ArrowRight size={14} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
             </div>
             <div style={{ fontSize: '1.75rem', fontWeight: 700, color: '#e2eaf4', lineHeight: 1, marginBottom: 4 }}>{value}</div>
             <div style={{ fontSize: '0.8rem', color: '#5a7a9e', marginBottom: 6 }}>{label}</div>
@@ -120,7 +128,13 @@ export default function AdminDashboard() {
         <div className="glass animate-fade-in-up" style={{ animationDelay: '120ms', padding: 24 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
             <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: 0 }}>Recent Admissions</h2>
-            <button className="btn-secondary" style={{ padding: '6px 14px', fontSize: '0.75rem' }}>All Admissions</button>
+            <button
+              onClick={() => navigate('/admin/appointments')}
+              className="btn-secondary cursor-pointer hover:bg-slate-700/50 transition-colors"
+              style={{ padding: '6px 14px', fontSize: '0.75rem' }}
+            >
+              All Admissions
+            </button>
           </div>
           <table className="data-table">
             <thead>
@@ -128,7 +142,12 @@ export default function AdminDashboard() {
             </thead>
             <tbody>
               {recentAdmissions.map((a) => (
-                <tr key={a.id}>
+                <tr
+                  key={a.id}
+                  onClick={() => navigate('/admin/patients')}
+                  className="cursor-pointer hover:bg-white/[0.04] transition-colors"
+                  title="View patient record"
+                >
                   <td>
                     <div style={{ fontWeight: 600, color: '#c0d4ed' }}>{a.patient}</div>
                     <div style={{ fontSize: '0.72rem', color: '#3a5070', fontFamily: 'monospace' }}>{a.id}</div>

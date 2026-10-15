@@ -11,6 +11,7 @@ Includes:
 """
 import os
 import uuid
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional
@@ -342,17 +343,58 @@ async def chat_about_medical_report(
             reply_text = ""
 
     if not reply_text:
-        # Structured clinical fallback grounded in document
-        # Check if question is asking about abnormal findings
-        if any(k in q for k in ["abnormal", "flag", "high", "low", "out of range"]):
+        # Structured clinical reasoning grounded strictly in document data
+        if any(k in q for k in ["treatment", "treat", "therapy", "medication", "medicine", "pill", "cure", "drug", "prescription", "how to treat"]):
+            treatment_parts = [
+                f"### Clinical Treatment & Therapy Guidance for this {report.document_type}",
+                "",
+                "**Clinical Boundary:** Diagnostic laboratory and imaging reports document objective physiological measurements and identify potential abnormalities — they do **not** prescribe or modify medications directly. Medical treatments must always be evaluated and prescribed by your physician in the context of your overall clinical history.",
+                "",
+            ]
+            if report.abnormal_findings_explained:
+                treatment_parts.append("**Findings in this Report Requiring Clinical Management:**")
+                for a in report.abnormal_findings_explained:
+                    treatment_parts.append(f"• **{a['test_name']}** ({a['result_value']}): {a.get('simple_explanation', '')}")
+                treatment_parts.append("")
+
+            # Extract practical next steps if available
+            if report.next_steps and isinstance(report.next_steps, dict):
+                actions = report.next_steps.get("practical_actions", [])
+                if actions:
+                    treatment_parts.append("**Recommended Next Steps & Clinical Management:**")
+                    for act in actions:
+                        treatment_parts.append(f"• {act}")
+                    treatment_parts.append("")
+
+            if report.questions_for_doctor:
+                treatment_parts.append("**Recommended Questions for Your Doctor Regarding Treatment:**")
+                for q_item in report.questions_for_doctor[:3]:
+                    treatment_parts.append(f"• \"{q_item}\"")
+                treatment_parts.append("")
+
+            treatment_parts.append("*Always consult your prescribing doctor before starting, stopping, or altering any medication or therapy.*")
+            reply_text = "\n".join(treatment_parts)
+
+        elif any(k in q for k in ["abnormal", "flag", "high", "low", "out of range"]):
             if report.abnormal_findings_explained:
                 items = "\n".join(
-                    f"• **{a['test_name']}**: {a['result_value']} (Reference interval: {a['reference_range']})\n  _{a['simple_explanation']}_"
+                    f"• **{a['test_name']}**: {a['result_value']} (Standard reference range: {a.get('reference_range', 'N/A')})\n  _{a.get('simple_explanation', '')}_"
                     for a in report.abnormal_findings_explained
                 )
-                reply_text = f"Here are the findings flagged outside normal reference ranges in this report:\n\n{items}\n\nBe sure to discuss what these mean for your individual situation with your doctor."
+                reply_text = f"Here are the findings flagged outside standard reference ranges in this report:\n\n{items}\n\nBe sure to discuss what these mean for your individual health with your doctor."
             else:
-                reply_text = "Good news — all analyzed findings in this document fall within normal standard reference intervals."
+                reply_text = "Good news — all analyzed findings in this document fall within standard reference intervals."
+
+        elif any(k in q for k in ["normal", "in range", "passed"]):
+            normal_findings = [f for f in report.extracted_findings if f.get("flag") == "NORMAL"]
+            if normal_findings:
+                items = "\n".join(
+                    f"• **{f['name']}**: {f['result_value']} {f.get('unit', '')} (Ref: {f.get('reference_range', 'N/A')})"
+                    for f in normal_findings[:8]
+                )
+                reply_text = f"The following tests in this report are within standard normal reference ranges:\n\n{items}\n\nNormal values indicate these specific biological markers are functioning as expected."
+            else:
+                reply_text = "No tests were explicitly marked as standard normal in this report."
 
         elif any(k in q for k in ["term", "mean", "meaning", "definition"]):
             matching_terms = [
@@ -363,25 +405,41 @@ async def chat_about_medical_report(
                 t = matching_terms[0]
                 reply_text = f"**{t['term']}**: {t['simple_explanation']}\n\nIn your report, this was noted in the context of {t.get('context', 'your laboratory evaluation')}."
             else:
-                terms_list = ", ".join(t["term"] for t in report.terminology_explanations[:5])
+                terms_list = ", ".join(t["term"] for t in report.terminology_explanations[:6])
                 reply_text = f"Here are key medical terms explained in your report: {terms_list}. You can ask about any of these terms specifically!"
 
-        elif any(k in q for k in ["question", "doctor", "ask"]):
+        elif any(k in q for k in ["question", "doctor", "ask", "appointment"]):
             q_list = "\n".join(f"• {item}" for item in report.questions_for_doctor)
             reply_text = f"Here are recommended questions you can ask your healthcare provider about this report:\n\n{q_list}"
 
-        elif any(k in q for k in ["summary", "simple words", "explain"]):
-            reply_text = f"**Summary of your {report.document_type}:**\n\n{report.key_findings_summary}\n\n" + (
-                "Remember: This report gives a snapshot of specific measurements but must be interpreted together with your symptoms and physical exam by your doctor."
+        elif any(k in q for k in ["summary", "simple words", "explain", "overview"]):
+            reply_text = f"**Overview of your {report.document_type}:**\n\n{report.key_findings_summary}\n\n" + (
+                "Remember: This report gives an objective snapshot of specific laboratory measurements. Your doctor will interpret these alongside your physical examination, symptoms, and medical history."
             )
         else:
-            # Check if document has anything related
-            reply_text = (
-                f"Based on your **{report.document_type}**:\n\n"
-                f"• {report.key_findings_summary}\n\n"
-                f"If you are asking about symptoms, treatments, or tests not listed in this specific document, "
-                f"this report does not contain that information. Please check your other health records or consult your healthcare provider."
-            )
+            # Check if user mentioned a specific test name from findings
+            matched_finding = None
+            for f in report.extracted_findings:
+                if f["name"].lower() in q or (f.get("short_name") and f["short_name"].lower() in q):
+                    matched_finding = f
+                    break
+
+            if matched_finding:
+                reply_text = (
+                    f"### Result for **{matched_finding['name']}**\n\n"
+                    f"• **Measured Value:** {matched_finding['result_value']} {matched_finding.get('unit', '')}\n"
+                    f"• **Reference Range:** {matched_finding.get('reference_range', 'Standard laboratory interval')}\n"
+                    f"• **Clinical Status:** {matched_finding.get('flag', 'NORMAL')}\n\n"
+                    f"_{matched_finding.get('clinical_significance', 'Measured as part of your comprehensive diagnostic panel.')}_\n\n"
+                    f"If you have questions about how this result relates to your symptoms or medication regimen, consult your doctor."
+                )
+            else:
+                reply_text = (
+                    f"This **{report.document_type}** specifically documents the ordered test panels. "
+                    f"It does not contain clinical data or findings regarding \"{payload.message}\".\n\n"
+                    f"Diagnostic laboratory tests measure specific biological markers rather than recording a complete medical history. "
+                    f"Please consult your healthcare provider or review your other medical records for information on this topic."
+                )
 
     # Save conversation turn
     chat_msg_user = MedicalReportChatMessage(
