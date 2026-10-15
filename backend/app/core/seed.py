@@ -2,7 +2,7 @@
 Auto-seeder for MediCare AI.
 Guarantees standard clinical demo credentials exist for production evaluation.
 """
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 import uuid
 import structlog
 from sqlalchemy import select
@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.security import hash_password
 from app.models.user import User, UserRole
 from app.models.doctor import Doctor
+from app.models.doctor_schedule import DoctorSchedule, DoctorTimeOff, DayOfWeek
 from app.models.patient import Patient, BloodType, Gender
 from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
 from app.models.prescription import Prescription, PrescriptionStatus
@@ -23,6 +24,13 @@ log = structlog.get_logger(__name__)
 
 async def seed_initial_data(session: AsyncSession) -> None:
     """Ensure baseline demo accounts exist for production evaluation."""
+    try:
+        from app.core.database import engine
+        from app.core.migrations import run_schema_migrations
+        await run_schema_migrations(engine)
+    except Exception as _mig_err:
+        log.debug("Auto-migration during seed pass-through", error=str(_mig_err))
+
     try:
         # 1. Admin
         res_admin = await session.execute(select(User).where(User.email == "admin@medicare.ai"))
@@ -177,7 +185,7 @@ async def seed_initial_data(session: AsyncSession) -> None:
             res_appt = await session.execute(
                 select(Appointment).where(Appointment.patient_id == pat_profile.id)
             )
-            if not res_appt.scalar_one_or_none():
+            if not res_appt.scalars().first():
                 appt = Appointment(
                     id=uuid.uuid4(),
                     patient_id=pat_profile.id,
@@ -498,6 +506,167 @@ async def seed_initial_data(session: AsyncSession) -> None:
                     log.info("Seeded BioSens FS-100 optical station for Alice Johnson")
             except Exception as dev_err:
                 log.warning("Skipping device seeding (table may not be created yet)", error=str(dev_err))
+
+        # 9. Seed Full Demonstration Doctors and Working Shift Schedules
+        try:
+            CLINIC_DOCTORS = [
+                {
+                    "email": "sarah.chen@medicare.ai",
+                    "name": "Dr. Sarah Chen, MD, FACC",
+                    "specialty": "Cardiology",
+                    "department": "Cardiovascular Medicine",
+                    "license": "MD-2024-99881",
+                    "location": "North Tower Suite 401",
+                    "phone": "(555) 234-1101",
+                    "bio": "Board-certified cardiologist specializing in preventive cardiology, hypertension titration, and echocardiography.",
+                    "shifts": [
+                        (DayOfWeek.MONDAY, time(9, 0), time(17, 0), 30),
+                        (DayOfWeek.TUESDAY, time(9, 0), time(17, 0), 30),
+                        (DayOfWeek.WEDNESDAY, time(9, 0), time(17, 0), 30),
+                        (DayOfWeek.THURSDAY, time(9, 0), time(17, 0), 30),
+                        (DayOfWeek.FRIDAY, time(9, 0), time(13, 0), 30),
+                    ]
+                },
+                {
+                    "email": "james.kim@medicare.ai",
+                    "name": "Dr. James Kim, MD",
+                    "specialty": "Endocrinology",
+                    "department": "Endocrinology & Metabolism",
+                    "license": "MD-2024-99882",
+                    "location": "West Wing Suite 310",
+                    "phone": "(555) 234-1102",
+                    "bio": "Endocrinologist focusing on Type 1 and Type 2 diabetes management, CGM telemetry, and thyroid disease.",
+                    "shifts": [
+                        (DayOfWeek.MONDAY, time(8, 30), time(16, 30), 30),
+                        (DayOfWeek.TUESDAY, time(8, 30), time(16, 30), 30),
+                        (DayOfWeek.WEDNESDAY, time(8, 30), time(16, 30), 30),
+                        (DayOfWeek.THURSDAY, time(8, 30), time(16, 30), 30),
+                        (DayOfWeek.FRIDAY, time(8, 30), time(16, 30), 30),
+                    ]
+                },
+                {
+                    "email": "maria.lopez@medicare.ai",
+                    "name": "Dr. Maria Lopez, MD",
+                    "specialty": "General Practice",
+                    "department": "General Internal Medicine",
+                    "license": "MD-2024-99883",
+                    "location": "East Pavilion Clinic 2A",
+                    "phone": "(555) 234-1103",
+                    "bio": "Primary care physician dedicated to routine physicals, wellness screening, and multi-morbid care coordination.",
+                    "shifts": [
+                        (DayOfWeek.MONDAY, time(8, 0), time(17, 0), 30),
+                        (DayOfWeek.TUESDAY, time(8, 0), time(17, 0), 30),
+                        (DayOfWeek.WEDNESDAY, time(8, 0), time(17, 0), 30),
+                        (DayOfWeek.THURSDAY, time(8, 0), time(17, 0), 30),
+                        (DayOfWeek.FRIDAY, time(8, 0), time(17, 0), 30),
+                    ]
+                },
+                {
+                    "email": "alex.taylor@medicare.ai",
+                    "name": "Dr. Alex Taylor, MD, FCCP",
+                    "specialty": "Pulmonology",
+                    "department": "Pulmonology & Critical Care",
+                    "license": "MD-2024-99884",
+                    "location": "North Tower Suite 505",
+                    "phone": "(555) 234-1104",
+                    "bio": "Pulmonologist specializing in asthma, COPD, pulmonary fibrosis, and respiratory care.",
+                    "shifts": [
+                        (DayOfWeek.TUESDAY, time(9, 0), time(16, 0), 45),
+                        (DayOfWeek.WEDNESDAY, time(9, 0), time(16, 0), 45),
+                        (DayOfWeek.THURSDAY, time(9, 0), time(16, 0), 45),
+                        (DayOfWeek.FRIDAY, time(9, 0), time(16, 0), 45),
+                    ]
+                },
+                {
+                    "email": "elena.rostova@medicare.ai",
+                    "name": "Dr. Elena Rostova, MD, PhD",
+                    "specialty": "Neurology",
+                    "department": "Neurology & Stroke",
+                    "license": "MD-2024-99885",
+                    "location": "West Wing Suite 412",
+                    "phone": "(555) 234-1105",
+                    "bio": "Neurologist and stroke specialist focusing on migraine management, peripheral neuropathies, and cognitive health.",
+                    "shifts": [
+                        (DayOfWeek.MONDAY, time(10, 0), time(17, 0), 45),
+                        (DayOfWeek.WEDNESDAY, time(10, 0), time(17, 0), 45),
+                        (DayOfWeek.FRIDAY, time(10, 0), time(17, 0), 45),
+                    ]
+                },
+            ]
+
+            for d_info in CLINIC_DOCTORS:
+                # 1. Ensure user exists
+                u_stmt = select(User).where(User.email == d_info["email"])
+                u_res = await session.execute(u_stmt)
+                u_obj = u_res.scalar_one_or_none()
+                if not u_obj:
+                    u_obj = User(
+                        id=uuid.uuid4(),
+                        email=d_info["email"],
+                        hashed_password=hash_password("DoctorPass123!"),
+                        full_name=d_info["name"],
+                        role=UserRole.DOCTOR,
+                        is_active=True,
+                        is_verified=True,
+                    )
+                    session.add(u_obj)
+                    await session.flush()
+                else:
+                    u_obj.full_name = d_info["name"]
+
+                # 2. Ensure doctor profile exists
+                d_stmt = select(Doctor).where(Doctor.user_id == u_obj.id)
+                d_res = await session.execute(d_stmt)
+                d_obj = d_res.scalar_one_or_none()
+                if not d_obj:
+                    d_obj = Doctor(
+                        id=uuid.uuid4(),
+                        user_id=u_obj.id,
+                        license_number=d_info["license"],
+                        specialty=d_info["specialty"],
+                        department=d_info["department"],
+                        office_location=d_info["location"],
+                        phone=d_info["phone"],
+                        is_accepting_patients=True,
+                        bio=d_info["bio"],
+                    )
+                    session.add(d_obj)
+                    await session.flush()
+                else:
+                    d_obj.specialty = d_info["specialty"]
+                    d_obj.department = d_info["department"]
+                    d_obj.office_location = d_info["location"]
+                    d_obj.phone = d_info["phone"]
+                    d_obj.is_accepting_patients = True
+                    d_obj.bio = d_info["bio"]
+
+                # 3. Ensure Doctor Schedule shifts exist
+                for dow, start_tm, end_tm, duration in d_info["shifts"]:
+                    s_stmt = select(DoctorSchedule).where(
+                        DoctorSchedule.doctor_id == d_obj.id,
+                        DoctorSchedule.day_of_week == dow,
+                    )
+                    s_res = await session.execute(s_stmt)
+                    s_obj = s_res.scalar_one_or_none()
+                    if not s_obj:
+                        s_obj = DoctorSchedule(
+                            id=uuid.uuid4(),
+                            doctor_id=d_obj.id,
+                            day_of_week=dow,
+                            start_time=start_tm,
+                            end_time=end_tm,
+                            slot_duration_minutes=duration,
+                            is_telehealth_capable=True,
+                            is_in_person_capable=True,
+                            clinic_timezone="America/New_York",
+                            is_active=True,
+                        )
+                        session.add(s_obj)
+
+            await session.flush()
+            log.info("Demonstration doctors and recurring weekly schedules successfully verified/seeded.")
+        except Exception as sched_err:
+            log.warning("Skipping schedule seeding (table might not exist yet)", error=str(sched_err))
 
         await session.commit()
         log.info("Baseline clinical accounts verification/seeding completed successfully.")

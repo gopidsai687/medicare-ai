@@ -2,6 +2,7 @@
 from app.models.user import User, UserRole
 from app.models.patient import Patient, BloodType, Gender
 from app.models.doctor import Doctor
+from app.models.doctor_schedule import DoctorSchedule, DoctorTimeOff, DayOfWeek
 from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
 from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
 from app.models.prescription import Prescription, PrescriptionStatus

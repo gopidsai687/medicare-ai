@@ -65,6 +65,9 @@ class Appointment(UUIDMixin, TimestampMixin, Base):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     room: Mapped[str | None] = mapped_column(String(50), nullable=True)
     telehealth_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    booking_reference: Mapped[str | None] = mapped_column(String(50), unique=True, index=True, nullable=True)
+    cancellation_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    rescheduled_from_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType(), nullable=True)
 
     # Relationships
     patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")

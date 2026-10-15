@@ -109,7 +109,7 @@ export default function DoctorSchedule() {
           const mapped: ScheduleSlot[] = data.map((a: any) => ({
             id: a.id,
             time: new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
-            patient: a.patient?.user?.full_name ?? null,
+            patient: a.patient_name || a.patient?.user?.full_name || 'Assigned Patient',
             type: a.appointment_type === 'telehealth' ? 'Telehealth Consult' : a.appointment_type === 'follow_up' ? 'Follow-up' : a.appointment_type === 'urgent' ? 'Urgent Add-on' : 'In-Person Consult',
             reason: a.reason,
             room: a.room ?? undefined,
@@ -124,10 +124,25 @@ export default function DoctorSchedule() {
       .catch(() => { /* fall back to demo */ })
   }, [])
 
-  const updateStatus = (id: string, newStatus: ScheduleSlot['status']) => {
+  const updateStatus = async (id: string, newStatus: ScheduleSlot['status']) => {
     setSlots((prev) =>
       prev.map((s) => (s.id === id ? { ...s, status: newStatus } : s))
     )
+    const backendStatusMap: Record<string, string> = {
+      'Scheduled': 'scheduled',
+      'Checked In': 'confirmed',
+      'In Progress': 'in_progress',
+      'Completed': 'completed',
+    }
+    const backendStatus = backendStatusMap[newStatus]
+    if (backendStatus) {
+      try {
+        await api.patch(`/api/v1/appointments/${id}`, { status: backendStatus })
+        success('Status Updated', `Appointment status set to ${newStatus}`)
+      } catch (err) {
+        console.warn('Could not persist status to backend:', err)
+      }
+    }
   }
 
   return (

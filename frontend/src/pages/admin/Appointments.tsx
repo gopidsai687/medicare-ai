@@ -121,10 +121,10 @@ export default function AdminAppointments() {
         if (data && data.length > 0) {
           const mapped: AdminAppointment[] = data.map((a: any) => ({
             id: a.id,
-            patientName: a.patient?.user?.full_name ?? 'Unknown Patient',
-            mrn: a.patient?.mrn ?? '',
-            doctorName: a.doctor?.user?.full_name ?? 'Unknown Doctor',
-            department: a.doctor?.department ?? 'General',
+            patientName: a.patient_name || a.patient?.user?.full_name || 'Unknown Patient',
+            mrn: a.patient_mrn || a.patient?.mrn || '',
+            doctorName: a.doctor_name || a.doctor?.user?.full_name || 'Unknown Doctor',
+            department: a.doctor_department || a.doctor?.department || 'General',
             dateTime: new Date(a.scheduled_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
             type: a.appointment_type === 'telehealth' ? 'TELEHEALTH' : 'IN_PERSON',
             room: a.room ?? '—',
@@ -145,7 +145,7 @@ export default function AdminAppointments() {
   const [newTime, setNewTime] = useState('')
   const [newStatus, setNewStatus] = useState<AdminAppointment['status']>('SCHEDULED')
 
-  const handleUpdateAppointment = (e: React.FormEvent) => {
+  const handleUpdateAppointment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!editingApt) return
     setAppointments((prev) =>
@@ -160,13 +160,23 @@ export default function AdminAppointments() {
           : apt
       )
     )
+    try {
+      await api.patch(`/api/v1/appointments/${editingApt.id}`, { status: newStatus.toLowerCase() })
+    } catch (err) {
+      console.warn('Admin status update failed to sync with backend:', err)
+    }
     setEditingApt(null)
   }
 
-  const handleStatusQuickChange = (id: string, newSt: AdminAppointment['status']) => {
+  const handleStatusQuickChange = async (id: string, newSt: AdminAppointment['status']) => {
     setAppointments((prev) =>
       prev.map((apt) => (apt.id === id ? { ...apt, status: newSt } : apt))
     )
+    try {
+      await api.patch(`/api/v1/appointments/${id}`, { status: newSt.toLowerCase() })
+    } catch (err) {
+      console.warn('Admin quick status update failed to sync with backend:', err)
+    }
   }
 
   const filteredApts = appointments.filter((apt) => {
