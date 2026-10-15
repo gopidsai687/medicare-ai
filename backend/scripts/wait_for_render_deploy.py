@@ -6,9 +6,9 @@ import sys
 import re
 
 BASE = "https://medicare-ai-iv31.onrender.com"
-TARGET_COMMIT = "0d485d7"
-EXPECTED_BUNDLE = "index-Ix3KBKl5"
-EXPECTED_CSS = "index-B0d9Y_eN"
+TARGET_COMMIT = "fcc0637"
+EXPECTED_BUNDLE = "index-BNEtN8Kt"
+EXPECTED_CSS = "index-DT94NDlZ"
 
 print("==================================================================", flush=True)
 print(f"Monitoring Render for Live Deployment of Commit {TARGET_COMMIT}...", flush=True)
