@@ -6,9 +6,10 @@ import sys
 import re
 
 BASE = "https://medicare-ai-iv31.onrender.com"
-TARGET_COMMIT = "fcc0637"
-EXPECTED_BUNDLE = "index-BNEtN8Kt"
+TARGET_COMMIT = "9546797"
+EXPECTED_BUNDLE = "index-D753UHAG"
 EXPECTED_CSS = "index-DT94NDlZ"
+
 
 print("==================================================================", flush=True)
 print(f"Monitoring Render for Live Deployment of Commit {TARGET_COMMIT}...", flush=True)
@@ -24,8 +25,9 @@ for attempt in range(1, 150):
             scripts = re.findall(r'src="([^"]+)"', html)
             css = re.findall(r'href="([^"]+\.css)"', html)
             
-            # Detect new container: expected bundle exists
-            is_new = any(EXPECTED_BUNDLE in s for s in scripts) or any(EXPECTED_CSS in c for c in css)
+            # Detect new container: expected bundle exists in scripts
+            is_new = any(EXPECTED_BUNDLE in s for s in scripts)
+
             if is_new:
                 print(f"\n>>> SUCCESS: Commit {TARGET_COMMIT} is DEPLOYED and LIVE on Render! (Attempt {attempt}) <<<\n", flush=True)
                 print(f"Live HTML scripts: {scripts}", flush=True)

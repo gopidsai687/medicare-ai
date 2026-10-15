@@ -1,0 +1,36 @@
+sequenceDiagram
+    autonumber
+    actor Patient as Patient (Browser)
+    participant UI as Prescription Analysis UI
+    participant Router as API Router (/api/v1/prescriptions)
+    participant Pipe as PrescriptionPipeline
+    participant Sanitizer as Prompt Injection Guard
+    participant Extractor as pypdf / OCR Service
+    participant KB as Drug Interaction KB (10 Rules)
+    participant AI as Gemini 2.5 Pro / Deterministic Fallback
+    participant DB as Database (prescriptions & interactions)
+
+    Patient->>UI: Uploads prescription PDF or camera photo
+    UI->>Router: POST /api/v1/prescriptions/upload (multipart)
+    Router->>Pipe: validate_file_upload(file_bytes, filename)
+    Pipe-->>Router: File integrity verified
+    Router->>Extractor: extract_text_from_file(file_bytes)
+    Extractor-->>Pipe: Raw medication text
+    Pipe->>Sanitizer: sanitize_ocr_text(raw_text)
+    Sanitizer-->>Pipe: Injection-safe text
+    Pipe->>Pipe: extract_entities_regex(clean_text)
+    Note over Pipe: Extracts: Medication name, dosage (mg), route, frequency
+    Pipe->>KB: check_drug_interactions(extracted_drugs, patient_active_meds)
+    Note over KB: Cross-references 10 high-risk pairs:<br/>Warfarin+Aspirin, ACE-I+Spironolactone, Metformin+Contrast...
+    KB-->>Pipe: Interaction list (Severity, Rationale, Clinical Advice)
+    Pipe->>AI: generate_patient_instructions(entities, interactions)
+    alt Gemini Active
+        AI-->>Pipe: Plain-language dosage schedule, food timing, red flags
+    else Gemini Offline
+        Pipe->>Pipe: generate_rule_based_medication_guidance()
+    end
+    Pipe->>DB: INSERT into prescription_uploads & extracted_medications
+    DB-->>Pipe: Confirmed
+    Pipe-->>Router: Structured prescription analysis JSON
+    Router-->>UI: HTTP 200 OK
+    UI-->>Patient: Displays interactive dosage card, precautions, and checklists

@@ -1,0 +1,43 @@
+graph TB
+    subgraph ClientEdge ["Client Environments"]
+        Browser[Modern Web Browser - Chrome, Edge, Safari, Firefox]
+        PWA[Progressive Web App - Service Worker v3 + Manifest]
+    end
+
+    subgraph RenderPlatform ["Render.com Managed Cloud Platform"]
+        EdgeProxy["Render HTTPS Reverse Proxy (TLS 1.3, Port 443)"]
+        
+        subgraph DockerContainer ["Multi-Stage Docker Container (Debian 12 Slim)"]
+            Port["Container Port :10000 ($PORT)"]
+            Uvicorn["Uvicorn ASGI Process (app.main:app)"]
+            FastAPI["FastAPI Web Framework (Python 3.12)"]
+            StaticMount["StaticFiles Mount (/assets & SPA Route Fallback)"]
+            
+            subgraph Assets ["Embedded Pre-Compiled React Assets"]
+                HTML["index.html (No-Cache Headers)"]
+                JSBundles["Vite JS Chunks (Dual-Generation Retention)"]
+                CSS["Tailwind CSS Bundle (index-DT94NDlZ.css)"]
+            end
+            
+            subgraph LocalData ["Container Local Storage"]
+                SQLiteDB[("medicare.db (aiosqlite Async Engine)")]
+                UploadsDir["/app/backend/uploads/"]
+            end
+        end
+
+        subgraph ManagedServices ["External Managed Services"]
+            PostgresDB[("Managed PostgreSQL + pgvector (Enterprise Target)")]
+            GeminiAPI["Google Gemini 2.5 Pro Generative AI API"]
+        end
+    end
+
+    Browser -->|HTTPS / WSS| EdgeProxy
+    PWA -->|HTTPS| EdgeProxy
+    EdgeProxy -->|HTTP Reverse Proxy| Port
+    Port --> Uvicorn
+    Uvicorn --> FastAPI
+    FastAPI --> StaticMount
+    StaticMount --> Assets
+    FastAPI -->|Async SQLAlchemy| SQLiteDB
+    FastAPI -.->|Production Target| PostgresDB
+    FastAPI -->|REST API Key| GeminiAPI

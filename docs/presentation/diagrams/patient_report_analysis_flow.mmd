@@ -1,0 +1,35 @@
+sequenceDiagram
+    autonumber
+    actor Patient as Patient (Browser)
+    participant UI as Medical Report UI
+    participant Router as API Gateway (/api/v1/medical-reports)
+    participant Pipe as MedicalReportPipeline
+    participant Guard as Anti-Injection Sanitizer
+    participant Extractor as pypdf / OCR Service
+    participant Dict as Clinical Term Dictionary (37 Terms)
+    participant AI as Gemini 2.5 Pro (Fallback Enabled)
+    participant DB as Database (medical_reports & analyses)
+
+    Patient->>UI: Selects blood panel / lab report (PDF/PNG) & clicks Analyze
+    UI->>Router: POST /api/v1/medical-reports/upload (multipart form)
+    Router->>Pipe: validate_mime_and_magic_bytes(file)
+    Pipe-->>Router: Format verified (%PDF-, PNG, JPEG <= 10MB)
+    Router->>Extractor: extract_document_text(file_bytes)
+    Extractor-->>Pipe: Raw extracted clinical text
+    Pipe->>Guard: scan_for_prompt_injections(raw_text)
+    Guard-->>Pipe: Sanitized text ([REDACTED_INJECTION_PATTERN])
+    Pipe->>Dict: match_clinical_biomarkers(sanitized_text)
+    Note over Dict: Identifies: HbA1c, eGFR, Troponin, ALT/AST, WBC...<br/>Attaches reference ranges & standard clinical definitions
+    Dict-->>Pipe: Matched biomarker entities & flagged outliers
+    Pipe->>AI: generate_4part_plain_language_summary(entities)
+    alt Gemini API Key Available
+        AI-->>Pipe: Context-grounded patient guidance & red flag warnings
+    else API Offline / Quota Exceeded
+        Pipe->>Pipe: generate_deterministic_rule_based_fallback()
+        Note over Pipe: Generates standard clinical dictionary synthesis
+    end
+    Pipe->>DB: INSERT into medical_report_uploads & ai_analyses
+    DB-->>Pipe: Analysis UUID committed
+    Pipe-->>Router: Complete 4-part JSON payload
+    Router-->>UI: HTTP 200 OK {summary, flagged_items, questions_for_doctor}
+    UI-->>Patient: Renders interactive breakdown & enables follow-up Q&A

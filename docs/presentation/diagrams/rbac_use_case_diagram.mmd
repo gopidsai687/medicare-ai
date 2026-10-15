@@ -1,0 +1,40 @@
+graph LR
+    subgraph Roles ["User Roles (RBAC)"]
+        Pat((Patient))
+        Doc((Doctor / Clinician))
+        Nur((Nurse / Care Coordinator))
+        Adm((Hospital Administrator))
+    end
+
+    subgraph PatientCases ["Patient Portal Use Cases"]
+        UC_P1[View Personal Health Dashboard & Vitals HUD]
+        UC_P2[Log Blood Pressure & Blood Glucose]
+        UC_P3[Upload & Analyze Medical Reports]
+        UC_P4[Upload & Analyze Prescriptions]
+        UC_P5[Review Medication Schedule & Interactions]
+        UC_P6[Explore Anatomical Body Map & Hotspots]
+        UC_P7[Pair Biomedical Telemetry Peripherals]
+        UC_P8[Locate Verified Emergency Facilities & 911]
+    end
+
+    subgraph ClinicalCases ["Clinician & Nursing Use Cases"]
+        UC_C1[Review Consented Patient List]
+        UC_C2[Monitor Real-Time Clinical Alert Queue]
+        UC_C3[Acknowledge & Action Outlier Alerts]
+        UC_C4[View Patient Longitudinal Trends & MAP]
+        UC_C5[Record Encounter Notes & ICD-10 Tags]
+        UC_C6[Manage Appointments & Clinic Schedule]
+    end
+
+    subgraph AdminCases ["Governance & Administrator Use Cases"]
+        UC_A1[Inspect Master Patient Index MPI]
+        UC_A2[Audit System Activity & HIPAA Logs]
+        UC_A3[Manage Clinical Staff & Provider Directory]
+        UC_A4[Manage Hospital Departments & Clinics]
+        UC_A5[Monitor System Health & DB Engine State]
+    end
+
+    Pat --> UC_P1 & UC_P2 & UC_P3 & UC_P4 & UC_P5 & UC_P6 & UC_P7 & UC_P8
+    Doc --> UC_C1 & UC_C2 & UC_C3 & UC_C4 & UC_C5 & UC_C6
+    Nur --> UC_C1 & UC_C2 & UC_C4 & UC_C6
+    Adm --> UC_A1 & UC_A2 & UC_A3 & UC_A4 & UC_A5

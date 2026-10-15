@@ -1,0 +1,45 @@
+sequenceDiagram
+    autonumber
+    actor Patient as Patient / Wearer
+    participant Sensor as Biomedical Sensor / Home Cuff
+    participant UI as VitalSense UI
+    participant API as Vitals Router (/api/v1/vitals)
+    participant DevAPI as Device Router (/api/v1/devices)
+    participant Evaluator as AHA / ADA Guidelines Engine
+    participant AlertEng as Clinical Safety Engine
+    participant DB as Database (vital_signs & vital_alerts)
+    actor Doctor as Attending Physician
+
+    alt Physical Sensor Telemetry Stream
+        Patient->>Sensor: Positions finger on optical photodiode
+        Sensor->>UI: WebSerial / WebBluetooth UART packet (115.2k baud)
+        UI->>DevAPI: POST /api/v1/devices/telemetry/ingest {hr, spo2, force}
+        DevAPI->>DevAPI: Verify SQI (SNR > 25dB, Contact 0.3-2.5N) & SHA-256 hash
+        DevAPI->>DB: INSERT into device_telemetry_packets (provenance='MEASURED_DEVICE')
+        DevAPI->>API: Forward biometrics to clinical vitals ledger
+    else Mode B Manual Home Reading
+        Patient->>UI: Inputs BP (145/92 mmHg) from oscillometric cuff
+        UI->>API: POST /api/v1/vitals/blood-pressure {source: 'manual_home_cuff'}
+    end
+
+    API->>Evaluator: Compute MAP and classify AHA / ADA category
+    Note over Evaluator: MAP = 92 + (145-92)/3 = 109.7 mmHg<br/>Category: Hypertension Stage 2
+    API->>AlertEng: evaluate_vital_bounds(reading)
+    AlertEng-->>API: Active Clinical Alert Triggered (Stage 2 HTN)
+    API->>DB: INSERT into vital_signs (is_sample=false)
+    API->>DB: INSERT into vital_alerts (severity='WARNING', status='ACTIVE')
+    DB-->>API: Confirmed
+    API-->>UI: HTTP 201 Created {vital_id, map: 109.7, category: 'Stage 2'}
+    UI-->>Patient: Real-time HUD updates with cautionary banner
+
+    rect rgb(20, 30, 45)
+    Note over Doctor,DB: Asynchronous Clinician Triage
+    Doctor->>API: GET /api/v1/vitals/doctor/alerts
+    API->>DB: SELECT active alerts JOIN vital_signs
+    DB-->>API: Active Stage 2 HTN alert returned
+    API-->>Doctor: Alert queue populated with patient record
+    Doctor->>API: POST /api/v1/vitals/alerts/{id}/action {note: 'Schedule telehealth review'}
+    API->>DB: UPDATE vital_alerts SET status='RESOLVED', actioned_by=doctor_id
+    DB-->>API: Updated
+    API-->>Doctor: Alert dismissed with timestamped audit confirmation
+    end
