@@ -112,6 +112,7 @@ class SpecialtyRead(BaseModel):
 class DoctorProfileRead(BaseModel):
     id: uuid.UUID
     name: str
+    full_name: Optional[str] = None
     specialty: str
     department: str
     office_location: str
@@ -120,3 +121,10 @@ class DoctorProfileRead(BaseModel):
     bio: Optional[str] = None
     working_days: List[str] = []
     earliest_available_date: Optional[str] = None
+
+    def model_post_init(self, __context) -> None:
+        if not self.full_name and self.name:
+            self.full_name = self.name
+        elif not self.name and self.full_name:
+            self.name = self.full_name
+

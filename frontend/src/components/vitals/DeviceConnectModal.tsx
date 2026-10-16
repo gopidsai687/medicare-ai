@@ -94,7 +94,7 @@ export const DeviceConnectModal: React.FC<DeviceConnectModalProps> = ({
       // Attempt genuine Web Bluetooth peripheral request
       // @ts-ignore
       const bleDevice = await navigator.bluetooth.requestDevice({
-        filters: [{ services: [device.gattService.split(' ')[0]] }],
+        filters: [{ services: [(device?.gattService || '').split(' ')[0] || 'heart_rate'] }],
         optionalServices: ['battery_service', 'device_information'],
       })
 

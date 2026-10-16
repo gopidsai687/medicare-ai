@@ -369,3 +369,70 @@ async def test_september_30_past_date_filtering():
         assert past_resp.status_code == 200
         past_ids = [a["id"] for a in past_resp.json()]
         assert str(past_appt_id) in past_ids, "September 30 appointment MUST appear under past appointments"
+
+
+@pytest.mark.asyncio
+async def test_resilient_appointment_and_doctor_schema():
+    """
+    Validates that:
+    1. DoctorProfileRead schema always provides both `name` and `full_name` to prevent frontend undefined.split() crashes.
+    2. Appointments with null/missing optional fields serialize safely.
+    3. Input validation enforces reason length >= 5.
+    """
+    from app.schemas.appointment import DoctorProfileRead, AppointmentRead
+    import uuid
+
+    # 1. Test DoctorProfileRead dual name/full_name population
+    doc_id = uuid.uuid4()
+    p1 = DoctorProfileRead(
+        id=doc_id,
+        name="Dr. Sarah Chen, MD",
+        specialty="Cardiology",
+        department="Cardiology",
+        office_location="Suite 401",
+    )
+    assert p1.name == "Dr. Sarah Chen, MD"
+    assert p1.full_name == "Dr. Sarah Chen, MD", "full_name must be populated from name"
+
+    p2 = DoctorProfileRead(
+        id=doc_id,
+        name="",
+        full_name="Dr. James Kim, MD",
+        specialty="Endocrinology",
+        department="Endocrinology",
+        office_location="Suite 310",
+    )
+    assert p2.full_name == "Dr. James Kim, MD"
+    assert p2.name == "Dr. James Kim, MD", "name must be populated from full_name"
+
+    # 2. Test live API doctor list
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res_alice = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        alice_headers = {"Authorization": f"Bearer {res_alice.json()['access_token']}"}
+
+        doc_resp = await client.get("/api/v1/appointments/doctors", headers=alice_headers)
+        assert doc_resp.status_code == 200
+        docs = doc_resp.json()
+        assert len(docs) > 0
+        for d in docs:
+            assert "name" in d and d["name"] is not None
+            assert "full_name" in d and d["full_name"] is not None
+            # Verify splitting on full_name never throws
+            assert len(d["full_name"].split(" ")) >= 1
+
+        # 3. Test short reason rejection (prevents stray 'yy')
+        short_book_resp = await client.post(
+            "/api/v1/appointments",
+            headers=alice_headers,
+            json={
+                "doctor_id": str(docs[0]["id"]),
+                "scheduled_at": datetime.now(timezone.utc).isoformat(),
+                "reason": "yy",
+            },
+        )
+        assert short_book_resp.status_code == 422, "Reason shorter than 5 chars must be rejected with 422"
+

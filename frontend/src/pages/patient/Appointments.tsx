@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import {
   Calendar,
   Clock,
@@ -17,11 +17,9 @@ import {
   CalendarX,
   RefreshCw,
   FileText,
-  Phone,
   Building,
   Download,
   AlertTriangle,
-  Info,
   ShieldCheck,
   Check,
 } from 'lucide-react'
@@ -59,16 +57,18 @@ export interface SpecialtyItem {
 
 export interface DoctorItem {
   id: string
-  user_id: string
-  full_name: string
-  title: string
-  specialty: string
-  department: string
-  office_location: string
-  phone_number: string
-  consultation_duration: number
-  accepts_telehealth: boolean
-  has_schedule: boolean
+  user_id?: string
+  name?: string
+  full_name?: string
+  title?: string
+  specialty?: string
+  department?: string
+  office_location?: string
+  phone?: string
+  phone_number?: string
+  consultation_duration?: number
+  accepts_telehealth?: boolean
+  has_schedule?: boolean
 }
 
 export interface TimeSlot {
@@ -90,6 +90,24 @@ export interface AvailabilityData {
   suggested_dates: string[]
 }
 
+// Helper to safely extract initials without crashing on undefined/null
+function getDoctorInitials(name?: string | null): string {
+  if (!name || typeof name !== 'string') return 'MD'
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (parts.length === 0) return 'MD'
+  return parts.map((n) => n[0]).join('').slice(0, 2).toUpperCase()
+}
+
+// Helper to safely extract date string (YYYY-MM-DD)
+function safeDateOnly(isoString?: string | null): string {
+  if (!isoString || typeof isoString !== 'string') {
+    const d = new Date()
+    d.setDate(d.getDate() + 1)
+    return d.toISOString().split('T')[0]
+  }
+  return isoString.includes('T') ? isoString.split('T')[0] : isoString.slice(0, 10)
+}
+
 // Helper to generate a download .ics calendar file
 function downloadCalendarInvite(appt: {
   reference: string
@@ -100,39 +118,45 @@ function downloadCalendarInvite(appt: {
   location: string
   reason: string
 }) {
-  const start = new Date(appt.scheduledAt)
-  const end = new Date(start.getTime() + appt.durationMinutes * 60000)
+  try {
+    const start = new Date(appt.scheduledAt)
+    const validStart = isNaN(start.getTime()) ? new Date() : start
+    const duration = appt.durationMinutes || 30
+    const end = new Date(validStart.getTime() + duration * 60000)
 
-  const formatICSDate = (d: Date) =>
-    d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
+    const formatICSDate = (d: Date) =>
+      d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z'
 
-  const icsContent = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//MediCare AI//Appointment Scheduling//EN',
-    'CALSCALE:GREGORIAN',
-    'METHOD:PUBLISH',
-    'BEGIN:VEVENT',
-    `UID:${appt.reference}@medicare-ai.health`,
-    `DTSTAMP:${formatICSDate(new Date())}`,
-    `DTSTART:${formatICSDate(start)}`,
-    `DTEND:${formatICSDate(end)}`,
-    `SUMMARY:Medical Consult: ${appt.doctorName} (${appt.specialty})`,
-    `DESCRIPTION:Appointment Reference: ${appt.reference}\\nPhysician: ${appt.doctorName}\\nReason: ${appt.reason}`,
-    `LOCATION:${appt.location}`,
-    'STATUS:CONFIRMED',
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ].join('\r\n')
+    const icsContent = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//MediCare AI//Appointment Scheduling//EN',
+      'CALSCALE:GREGORIAN',
+      'METHOD:PUBLISH',
+      'BEGIN:VEVENT',
+      `UID:${appt.reference || 'REF-MC'}@medicare-ai.health`,
+      `DTSTAMP:${formatICSDate(new Date())}`,
+      `DTSTART:${formatICSDate(validStart)}`,
+      `DTEND:${formatICSDate(end)}`,
+      `SUMMARY:Medical Consult: ${appt.doctorName || 'Physician'} (${appt.specialty || 'General'})`,
+      `DESCRIPTION:Appointment Reference: ${appt.reference || 'REF'}\\nPhysician: ${appt.doctorName || 'Doctor'}\\nReason: ${appt.reason || 'Medical Consult'}`,
+      `LOCATION:${appt.location || 'Clinic'}`,
+      'STATUS:CONFIRMED',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].join('\r\n')
 
-  const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
-  const url = window.URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.setAttribute('download', `medicare-appointment-${appt.reference}.ics`)
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
+    const blob = new Blob([icsContent], { type: 'text/calendar;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.setAttribute('download', `medicare-appointment-${appt.reference || 'schedule'}.ics`)
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+  } catch (err) {
+    console.warn('Failed to generate calendar invite:', err)
+  }
 }
 
 export default function PatientAppointments() {
@@ -142,6 +166,7 @@ export default function PatientAppointments() {
   const [appointments, setAppointments] = useState<AppointmentItem[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [isLive, setIsLive] = useState(false)
+  const [fetchError, setFetchError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'upcoming' | 'all' | 'past' | 'cancelled'>('upcoming')
   const [searchQuery, setSearchQuery] = useState('')
 
@@ -172,7 +197,6 @@ export default function PatientAppointments() {
   const [selectedDoctor, setSelectedDoctor] = useState<DoctorItem | null>(null)
   const [visitType, setVisitType] = useState<'in_person' | 'telehealth'>('in_person')
   const [bookingDate, setBookingDate] = useState<string>(() => {
-    // Default to tomorrow or next business day
     const d = new Date()
     d.setDate(d.getDate() + 1)
     return d.toISOString().split('T')[0]
@@ -197,38 +221,72 @@ export default function PatientAppointments() {
     durationMinutes: number
   } | null>(null)
 
+  // ── Normalize appointment record for safe presentation ──────────────────
+  const normalizeAppointment = useCallback((raw: any): AppointmentItem => {
+    const fallbackId = `apt-${Math.random().toString(36).substring(2, 9)}`
+    const scheduledAt = raw?.scheduled_at || raw?.start_time || new Date().toISOString()
+    const apptDate = new Date(scheduledAt)
+    const isFuture = !isNaN(apptDate.getTime()) ? apptDate >= new Date() : true
+
+    return {
+      id: String(raw?.id || fallbackId),
+      doctor_id: String(raw?.doctor_id || ''),
+      doctor_name: raw?.doctor_name || raw?.doctor?.user?.full_name || raw?.doctor?.name || 'Assigned Physician',
+      doctor_specialty: raw?.doctor_specialty || raw?.doctor?.specialty || 'General Practice',
+      doctor_department: raw?.doctor_department || raw?.doctor?.department || 'Outpatient Clinic',
+      doctor_location: raw?.doctor_location || raw?.room || raw?.doctor?.office_location || 'Main Clinic Pavilion',
+      doctor_phone: raw?.doctor_phone || raw?.doctor?.phone || '(555) 234-1100',
+      scheduled_at: scheduledAt,
+      duration_minutes: Number(raw?.duration_minutes || 30),
+      appointment_type: raw?.appointment_type === 'telehealth' ? 'telehealth' : 'in_person',
+      room: raw?.room || (raw?.appointment_type === 'telehealth' ? 'Virtual Care Room' : 'Clinic Room 3A'),
+      reason: raw?.reason || 'Clinical consultation and review',
+      status: (raw?.status || 'scheduled').toLowerCase() as any,
+      booking_reference: raw?.booking_reference || (raw?.id ? `MC-2026-${String(raw.id).slice(0, 4).toUpperCase()}` : 'MC-2026-REF'),
+      cancellation_reason: raw?.cancellation_reason || null,
+      rescheduled_from_id: raw?.rescheduled_from_id || null,
+      clinic_timezone: raw?.clinic_timezone || 'America/New_York',
+      is_upcoming: raw?.is_upcoming !== undefined ? Boolean(raw.is_upcoming) : isFuture,
+    }
+  }, [])
+
   // ── Load Appointments from Backend ──────────────────────────────────────
-  const fetchAppointments = async () => {
+  const fetchAppointments = useCallback(async () => {
     setIsLoading(true)
+    setFetchError(null)
     try {
       const res = await api.get('/api/v1/appointments')
-      if (res.data) {
-        setAppointments(res.data)
+      if (res.data && Array.isArray(res.data)) {
+        const mapped = res.data.map(normalizeAppointment)
+        setAppointments(mapped)
+        setIsLive(true)
+      } else {
+        setAppointments([])
         setIsLive(true)
       }
-    } catch (err) {
-      console.warn('Failed to load live appointments, using verified demo structure:', err)
+    } catch (err: any) {
+      console.warn('Live appointments fetch notice:', err)
       setIsLive(false)
+      setFetchError(err?.response?.data?.detail || 'Unable to connect to live clinic server')
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [normalizeAppointment])
 
   useEffect(() => {
     fetchAppointments()
-  }, [])
+  }, [fetchAppointments])
 
   // ── Load Specialties and Doctors for Booking ────────────────────────────
   useEffect(() => {
     if (isBookingOpen) {
       api.get('/api/v1/appointments/specialties')
         .then((res) => {
-          if (res.data && res.data.length > 0) {
+          if (res.data && Array.isArray(res.data) && res.data.length > 0) {
             setSpecialties(res.data)
           }
         })
         .catch(() => {
-          // Fallback verified clinic specialties
           setSpecialties([
             { id: 'Cardiology', name: 'Cardiology', icon: 'Heart', description: 'Cardiovascular diagnostics, ECG, hypertension & lipid care', doctor_count: 1 },
             { id: 'Endocrinology', name: 'Endocrinology', icon: 'Activity', description: 'Metabolic disorders, type 1/2 diabetes, thyroid & hormone health', doctor_count: 1 },
@@ -242,27 +300,38 @@ export default function PatientAppointments() {
 
   // When specialty changes, fetch doctors for that specialty
   useEffect(() => {
-    if (selectedSpecialty) {
-      api.get('/api/v1/appointments/doctors', { params: { specialty: selectedSpecialty } })
-        .then((res) => {
-          setDoctors(res.data)
-          if (res.data.length > 0) {
-            setSelectedDoctor(res.data[0])
+    const params = selectedSpecialty ? { specialty: selectedSpecialty } : undefined
+    api.get('/api/v1/appointments/doctors', { params })
+      .then((res) => {
+        if (res.data && Array.isArray(res.data)) {
+          const mappedDocs: DoctorItem[] = res.data.map((d: any) => ({
+            id: String(d.id || ''),
+            name: d.name || d.full_name || 'Physician',
+            full_name: d.full_name || d.name || 'Physician',
+            specialty: d.specialty || 'General Practice',
+            department: d.department || 'Clinical Services',
+            office_location: d.office_location || 'Main Pavilion',
+            phone: d.phone || d.phone_number || '(555) 234-1100',
+            phone_number: d.phone_number || d.phone || '(555) 234-1100',
+            consultation_duration: Number(d.consultation_duration || 30),
+            accepts_telehealth: d.accepts_telehealth ?? true,
+            has_schedule: Boolean(d.has_schedule ?? true),
+          }))
+          setDoctors(mappedDocs)
+          if (mappedDocs.length > 0) {
+            setSelectedDoctor(mappedDocs[0])
           } else {
             setSelectedDoctor(null)
           }
-        })
-        .catch(() => {
+        } else {
           setDoctors([])
           setSelectedDoctor(null)
-        })
-    } else {
-      api.get('/api/v1/appointments/doctors')
-        .then((res) => {
-          setDoctors(res.data)
-        })
-        .catch(() => setDoctors([]))
-    }
+        }
+      })
+      .catch(() => {
+        setDoctors([])
+        setSelectedDoctor(null)
+      })
   }, [selectedSpecialty])
 
   // When doctor or bookingDate changes in Step 4, query genuine availability
@@ -279,10 +348,10 @@ export default function PatientAppointments() {
         .then((res) => {
           setAvailability(res.data)
         })
-        .catch((err) => {
+        .catch(() => {
           setAvailability({
             doctor_id: selectedDoctor.id,
-            doctor_name: selectedDoctor.full_name,
+            doctor_name: selectedDoctor.full_name || selectedDoctor.name || 'Physician',
             date: bookingDate,
             clinic_timezone: 'America/New_York',
             status: 'unconfigured',
@@ -315,53 +384,63 @@ export default function PatientAppointments() {
   }, [reschedulingAppt, rescheduleDate])
 
   // ── Filtered Appointments ───────────────────────────────────────────────
-  const now = new Date()
+  const now = useMemo(() => new Date(), [])
 
   const filteredAppointments = useMemo(() => {
     return appointments.filter((a) => {
-      const apptDate = new Date(a.scheduled_at)
-      const isPast = apptDate < now
-      const isFuture = apptDate >= now
+      const apptDate = a.scheduled_at ? new Date(a.scheduled_at) : null
+      const isValidDate = apptDate !== null && !isNaN(apptDate.getTime())
+      const isPast = isValidDate ? apptDate < now : false
+      const isFuture = isValidDate ? apptDate >= now : true
+      const status = (a.status || 'scheduled').toLowerCase()
 
       // Tab filtering
       let matchesTab = true
       if (activeTab === 'upcoming') {
-        matchesTab = isFuture && a.status !== 'cancelled' && a.status !== 'completed'
+        matchesTab = (a.is_upcoming ?? isFuture) && status !== 'cancelled' && status !== 'completed'
       } else if (activeTab === 'past') {
-        matchesTab = isPast || a.status === 'completed'
+        matchesTab = isPast || status === 'completed'
       } else if (activeTab === 'cancelled') {
-        matchesTab = a.status === 'cancelled'
+        matchesTab = status === 'cancelled'
       }
 
-      // Search filtering
-      const q = searchQuery.toLowerCase()
+      // Search filtering (null-safe)
+      const q = (searchQuery || '').toLowerCase().trim()
       const matchesSearch =
         !q ||
-        a.doctor_name.toLowerCase().includes(q) ||
-        a.doctor_specialty.toLowerCase().includes(q) ||
-        a.doctor_department.toLowerCase().includes(q) ||
-        a.reason.toLowerCase().includes(q) ||
-        (a.booking_reference && a.booking_reference.toLowerCase().includes(q))
+        (a.doctor_name || '').toLowerCase().includes(q) ||
+        (a.doctor_specialty || '').toLowerCase().includes(q) ||
+        (a.doctor_department || '').toLowerCase().includes(q) ||
+        (a.reason || '').toLowerCase().includes(q) ||
+        (a.booking_reference || '').toLowerCase().includes(q)
 
       return matchesTab && matchesSearch
     }).sort((a, b) => {
-      // Sort upcoming nearest first; past most recent first
-      const diffA = new Date(a.scheduled_at).getTime()
-      const diffB = new Date(b.scheduled_at).getTime()
-      if (activeTab === 'upcoming') return diffA - diffB
-      return diffB - diffA
+      const timeA = a.scheduled_at ? new Date(a.scheduled_at).getTime() : 0
+      const timeB = b.scheduled_at ? new Date(b.scheduled_at).getTime() : 0
+      if (activeTab === 'upcoming') return timeA - timeB
+      return timeB - timeA
     })
   }, [appointments, activeTab, searchQuery, now])
 
   // Counts for tabs
   const tabCounts = useMemo(() => {
-    const upcomingCount = appointments.filter(
-      (a) => new Date(a.scheduled_at) >= now && a.status !== 'cancelled' && a.status !== 'completed'
-    ).length
-    const pastCount = appointments.filter(
-      (a) => new Date(a.scheduled_at) < now || a.status === 'completed'
-    ).length
-    const cancelledCount = appointments.filter((a) => a.status === 'cancelled').length
+    const upcomingCount = appointments.filter((a) => {
+      const apptDate = a.scheduled_at ? new Date(a.scheduled_at) : null
+      const isFuture = apptDate && !isNaN(apptDate.getTime()) ? apptDate >= now : true
+      const status = (a.status || 'scheduled').toLowerCase()
+      return (a.is_upcoming ?? isFuture) && status !== 'cancelled' && status !== 'completed'
+    }).length
+
+    const pastCount = appointments.filter((a) => {
+      const apptDate = a.scheduled_at ? new Date(a.scheduled_at) : null
+      const isPast = apptDate && !isNaN(apptDate.getTime()) ? apptDate < now : false
+      const status = (a.status || 'scheduled').toLowerCase()
+      return isPast || status === 'completed'
+    }).length
+
+    const cancelledCount = appointments.filter((a) => (a.status || '').toLowerCase() === 'cancelled').length
+
     return {
       all: appointments.length,
       upcoming: upcomingCount,
@@ -390,18 +469,20 @@ export default function PatientAppointments() {
         scheduled_at: selectedSlot.start_time,
         appointment_type: visitType,
         reason: visitReason.trim(),
-        room: visitType === 'telehealth' ? 'Virtual Care Room' : selectedDoctor.office_location,
+        room: visitType === 'telehealth' ? 'Virtual Care Room' : selectedDoctor.office_location || 'Main Clinic',
       }
 
       const res = await api.post('/api/v1/appointments', payload)
       const newAppt = res.data
 
+      const doctorDisplayName = selectedDoctor.full_name || selectedDoctor.name || 'Physician'
+
       setConfirmedBooking({
         reference: newAppt.booking_reference || `MC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
-        doctorName: selectedDoctor.full_name,
-        specialty: selectedDoctor.specialty,
-        department: selectedDoctor.department,
-        location: newAppt.room || selectedDoctor.office_location,
+        doctorName: doctorDisplayName,
+        specialty: selectedDoctor.specialty || 'General Practice',
+        department: selectedDoctor.department || 'Outpatient Clinic',
+        location: newAppt.room || selectedDoctor.office_location || 'Main Clinic Pavilion',
         date: bookingDate,
         time: selectedSlot.label,
         type: visitType === 'telehealth' ? 'Telehealth Consultation' : 'In-Person Consultation',
@@ -412,18 +493,14 @@ export default function PatientAppointments() {
 
       success(
         'Appointment Confirmed',
-        `Booked with ${selectedDoctor.full_name} for ${new Date(selectedSlot.start_time).toLocaleDateString()}`
+        `Booked with ${doctorDisplayName} for ${new Date(selectedSlot.start_time).toLocaleDateString()}`
       )
 
-      // Refresh appointments list
       fetchAppointments()
-
-      // Advance to step 7 (Confirmation)
       setWizardStep(7)
     } catch (err: any) {
       const detail = err.response?.data?.detail || 'Unable to confirm appointment slot.'
       toastError('Booking Conflict', detail)
-      // If 409 conflict, stay on Step 4 and reload slots
       if (err.response?.status === 409) {
         setWizardStep(4)
         setSelectedSlot(null)
@@ -478,7 +555,6 @@ export default function PatientAppointments() {
     }
   }
 
-  // Close wizard and reset
   const handleCloseWizard = () => {
     setIsBookingOpen(false)
     setWizardStep(1)
@@ -490,23 +566,34 @@ export default function PatientAppointments() {
     setConfirmedBooking(null)
   }
 
-  // Helper date formatter
-  const formatDateDisplay = (isoString: string) => {
-    const d = new Date(isoString)
-    return d.toLocaleDateString('en-US', {
-      weekday: 'short',
-      month: 'short',
-      day: 'numeric',
-      year: 'numeric',
-    })
+  const formatDateDisplay = (isoString?: string | null) => {
+    if (!isoString) return 'Date Pending'
+    try {
+      const d = new Date(isoString)
+      if (isNaN(d.getTime())) return 'Scheduled'
+      return d.toLocaleDateString('en-US', {
+        weekday: 'short',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    } catch {
+      return 'Scheduled'
+    }
   }
 
-  const formatTimeDisplay = (isoString: string) => {
-    const d = new Date(isoString)
-    return d.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+  const formatTimeDisplay = (isoString?: string | null) => {
+    if (!isoString) return 'Time Pending'
+    try {
+      const d = new Date(isoString)
+      if (isNaN(d.getTime())) return 'Scheduled'
+      return d.toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
+    } catch {
+      return 'Scheduled'
+    }
   }
 
   return (
@@ -538,12 +625,31 @@ export default function PatientAppointments() {
         </button>
       </div>
 
+      {/* ── Error Banner with Real Retry Action ──────────────────────────── */}
+      {fetchError && !isLoading && (
+        <div className="p-4 rounded-2xl flex items-center justify-between bg-rose-500/10 border border-rose-500/20 text-rose-300 animate-fade-in text-xs gap-3">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle size={18} className="text-rose-400 shrink-0" />
+            <div>
+              <p className="font-semibold text-rose-200">Unable to sync appointments with server</p>
+              <p className="text-[11px] text-rose-300/80 mt-0.5">{fetchError}</p>
+            </div>
+          </div>
+          <button
+            onClick={() => fetchAppointments()}
+            className="px-3 py-1.5 rounded-xl bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-semibold border border-rose-500/30 flex items-center gap-1.5 transition-all shrink-0 cursor-pointer"
+          >
+            <RefreshCw size={12} /> Retry Now
+          </button>
+        </div>
+      )}
+
       {/* ── Filter Tabs & Search Bar ─────────────────────────────────────── */}
       <div className="glass p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between border border-white/10">
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
           <button
             onClick={() => setActiveTab('upcoming')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'upcoming'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
                 : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
@@ -553,7 +659,7 @@ export default function PatientAppointments() {
           </button>
           <button
             onClick={() => setActiveTab('all')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'all'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
                 : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
@@ -563,7 +669,7 @@ export default function PatientAppointments() {
           </button>
           <button
             onClick={() => setActiveTab('past')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'past'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
                 : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
@@ -573,7 +679,7 @@ export default function PatientAppointments() {
           </button>
           <button
             onClick={() => setActiveTab('cancelled')}
-            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 ${
+            className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all flex items-center gap-2 cursor-pointer ${
               activeTab === 'cancelled'
                 ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/25'
                 : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
@@ -625,7 +731,7 @@ export default function PatientAppointments() {
                 setIsBookingOpen(true)
                 setWizardStep(1)
               }}
-              className="mt-5 btn-primary inline-flex items-center gap-2"
+              className="mt-5 btn-primary inline-flex items-center gap-2 cursor-pointer"
             >
               <Plus size={16} /> Schedule Your Next Visit
             </button>
@@ -635,8 +741,11 @@ export default function PatientAppointments() {
         <div className="grid grid-cols-1 gap-4">
           {filteredAppointments.map((apt) => {
             const isTelehealth = apt.appointment_type === 'telehealth'
-            const isConfirmed = apt.status === 'confirmed' || apt.status === 'scheduled'
-            const isUpcoming = new Date(apt.scheduled_at) >= now && isConfirmed
+            const status = (apt.status || 'scheduled').toLowerCase()
+            const isConfirmed = status === 'confirmed' || status === 'scheduled'
+            const apptDate = apt.scheduled_at ? new Date(apt.scheduled_at) : null
+            const isFuture = apptDate && !isNaN(apptDate.getTime()) ? apptDate >= now : true
+            const isUpcoming = (apt.is_upcoming ?? isFuture) && isConfirmed
 
             return (
               <div
@@ -661,22 +770,22 @@ export default function PatientAppointments() {
                       <span className="font-mono text-xs font-semibold px-2 py-0.5 rounded-md bg-white/5 text-blue-300 border border-white/10">
                         {apt.booking_reference || 'REF-MC'}
                       </span>
-                      <h3 className="font-bold text-white text-base">{apt.doctor_name}</h3>
-                      <span className="text-xs text-slate-400 font-medium">({apt.doctor_specialty})</span>
+                      <h3 className="font-bold text-white text-base">{apt.doctor_name || 'Assigned Physician'}</h3>
+                      <span className="text-xs text-slate-400 font-medium">({apt.doctor_specialty || 'General Practice'})</span>
                       
                       {/* Status Badge */}
                       <span
                         className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                          apt.status === 'confirmed'
+                          status === 'confirmed'
                             ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : apt.status === 'scheduled'
+                            : status === 'scheduled'
                             ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                            : apt.status === 'completed'
+                            : status === 'completed'
                             ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
                             : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
                         }`}
                       >
-                        {apt.status.charAt(0).toUpperCase() + apt.status.slice(1)}
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
                       </span>
 
                       {/* Type Badge */}
@@ -685,7 +794,7 @@ export default function PatientAppointments() {
                       </span>
                     </div>
 
-                    <p className="text-sm text-slate-300 font-medium line-clamp-1">{apt.reason}</p>
+                    <p className="text-sm text-slate-300 font-medium line-clamp-1">{apt.reason || 'Consultation'}</p>
 
                     <div className="flex items-center gap-4 text-xs text-slate-400 flex-wrap pt-1">
                       <span className="flex items-center gap-1.5 text-slate-200 font-medium">
@@ -702,7 +811,7 @@ export default function PatientAppointments() {
                       </span>
                     </div>
 
-                    {apt.status === 'cancelled' && apt.cancellation_reason && (
+                    {status === 'cancelled' && apt.cancellation_reason && (
                       <p className="text-xs text-rose-400/90 italic flex items-center gap-1.5 pt-1">
                         <AlertTriangle size={13} /> Cancelled: {apt.cancellation_reason}
                       </p>
@@ -714,7 +823,7 @@ export default function PatientAppointments() {
                 <div className="flex items-center gap-2 self-end lg:self-center shrink-0 flex-wrap">
                   <button
                     onClick={() => setSelectedAppointment(apt)}
-                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition-all flex items-center gap-1.5"
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     <FileText size={13} /> View Details
                   </button>
@@ -724,7 +833,7 @@ export default function PatientAppointments() {
                       onClick={() =>
                         success('Connecting to Telehealth', `Launching secure video session for ${apt.booking_reference}`)
                       }
-                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/10"
+                      className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 flex items-center gap-1.5 transition-all shadow-md shadow-emerald-500/10 cursor-pointer"
                     >
                       <Video size={14} /> Join Telehealth
                     </button>
@@ -735,9 +844,9 @@ export default function PatientAppointments() {
                       <button
                         onClick={() => {
                           setReschedulingAppt(apt)
-                          setRescheduleDate(apt.scheduled_at.split('T')[0])
+                          setRescheduleDate(safeDateOnly(apt.scheduled_at))
                         }}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 border border-blue-500/20 flex items-center gap-1.5 transition-all"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-blue-500/10 text-blue-300 hover:bg-blue-500/20 border border-blue-500/20 flex items-center gap-1.5 transition-all cursor-pointer"
                       >
                         <RefreshCw size={13} /> Reschedule
                       </button>
@@ -747,7 +856,7 @@ export default function PatientAppointments() {
                           setCancellingAppt(apt)
                           setCancelReason('')
                         }}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 transition-all"
+                        className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 border border-rose-500/20 transition-all cursor-pointer"
                       >
                         Cancel
                       </button>
@@ -792,7 +901,7 @@ export default function PatientAppointments() {
               </div>
               <button
                 onClick={handleCloseWizard}
-                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-white/5 transition-all"
+                className="text-slate-400 hover:text-white p-2 rounded-xl hover:bg-white/5 transition-all cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -841,7 +950,7 @@ export default function PatientAppointments() {
                         setSelectedSpecialty(spec.name)
                         setWizardStep(2)
                       }}
-                      className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                      className={`p-4 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                         selectedSpecialty === spec.name
                           ? 'bg-blue-600/20 border-blue-500 text-white shadow-lg shadow-blue-500/15'
                           : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10 hover:border-white/20'
@@ -860,7 +969,7 @@ export default function PatientAppointments() {
               </div>
             )}
 
-            {/* ── STEP 2: Doctor Selection ─────────────────────────────── */}
+            {/* ── STEP 2: Doctor Selection (Safe Initials) ─────────────── */}
             {wizardStep === 2 && (
               <div className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -869,7 +978,7 @@ export default function PatientAppointments() {
                   </p>
                   <button
                     onClick={() => setSelectedSpecialty('')}
-                    className="text-xs text-blue-400 hover:underline"
+                    className="text-xs text-blue-400 hover:underline cursor-pointer"
                   >
                     View All Doctors
                   </button>
@@ -882,50 +991,51 @@ export default function PatientAppointments() {
                       <p className="text-sm">No physicians found for this specialty.</p>
                     </div>
                   ) : (
-                    doctors.map((doc) => (
-                      <button
-                        key={doc.id}
-                        type="button"
-                        onClick={() => setSelectedDoctor(doc)}
-                        className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between gap-4 ${
-                          selectedDoctor?.id === doc.id
-                            ? 'bg-blue-600/20 border-blue-500 shadow-md shadow-blue-500/20'
-                            : 'bg-white/5 border-white/10 hover:bg-white/10'
-                        }`}
-                      >
-                        <div className="flex items-center gap-3.5">
-                          <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-bold">
-                            {doc.full_name
-                              .split(' ')
-                              .map((n) => n[0])
-                              .join('')
-                              .slice(0, 2)}
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-bold text-white text-sm">{doc.full_name}</h4>
-                              <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-slate-300 border border-white/10">
-                                {doc.specialty}
-                              </span>
-                            </div>
-                            <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
-                              <span className="flex items-center gap-1">
-                                <Building size={12} className="text-slate-500" /> {doc.office_location}
-                              </span>
-                              <span className="flex items-center gap-1">
-                                <Clock size={12} className="text-slate-500" /> {doc.consultation_duration} mins
-                              </span>
-                            </p>
-                          </div>
-                        </div>
+                    doctors.map((doc) => {
+                      const docName = doc.full_name || doc.name || 'Physician'
+                      const isSelected = selectedDoctor?.id === doc.id
 
-                        {selectedDoctor?.id === doc.id && (
-                          <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0">
-                            <Check size={14} />
+                      return (
+                        <button
+                          key={doc.id}
+                          type="button"
+                          onClick={() => setSelectedDoctor(doc)}
+                          className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between gap-4 cursor-pointer ${
+                            isSelected
+                              ? 'bg-blue-600/20 border-blue-500 shadow-md shadow-blue-500/20'
+                              : 'bg-white/5 border-white/10 hover:bg-white/10'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3.5">
+                            <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-bold">
+                              {getDoctorInitials(docName)}
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h4 className="font-bold text-white text-sm">{docName}</h4>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/5 text-slate-300 border border-white/10">
+                                  {doc.specialty || 'General'}
+                                </span>
+                              </div>
+                              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
+                                <span className="flex items-center gap-1">
+                                  <Building size={12} className="text-slate-500" /> {doc.office_location || 'Main Pavilion'}
+                                </span>
+                                <span className="flex items-center gap-1">
+                                  <Clock size={12} className="text-slate-500" /> {doc.consultation_duration || 30} mins
+                                </span>
+                              </p>
+                            </div>
                           </div>
-                        )}
-                      </button>
-                    ))
+
+                          {isSelected && (
+                            <div className="w-6 h-6 rounded-full bg-blue-500 text-white flex items-center justify-center shrink-0">
+                              <Check size={14} />
+                            </div>
+                          )}
+                        </button>
+                      )
+                    })
                   )}
                 </div>
               </div>
@@ -939,7 +1049,7 @@ export default function PatientAppointments() {
                   <button
                     type="button"
                     onClick={() => setVisitType('in_person')}
-                    className={`p-5 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                    className={`p-5 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                       visitType === 'in_person'
                         ? 'bg-blue-600/20 border-blue-500 text-white shadow-lg shadow-blue-500/20'
                         : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
@@ -954,7 +1064,7 @@ export default function PatientAppointments() {
                     <div className="mt-4">
                       <h4 className="font-bold text-white text-base">In-Person Clinic Visit</h4>
                       <p className="text-xs text-slate-400 mt-1">
-                        Meet with {selectedDoctor?.full_name} at{' '}
+                        Meet with {selectedDoctor?.full_name || selectedDoctor?.name || 'your physician'} at{' '}
                         {selectedDoctor?.office_location || 'the main clinic pavilion'}.
                       </p>
                     </div>
@@ -963,7 +1073,7 @@ export default function PatientAppointments() {
                   <button
                     type="button"
                     onClick={() => setVisitType('telehealth')}
-                    className={`p-5 rounded-2xl border text-left transition-all flex flex-col justify-between ${
+                    className={`p-5 rounded-2xl border text-left transition-all flex flex-col justify-between cursor-pointer ${
                       visitType === 'telehealth'
                         ? 'bg-emerald-600/20 border-emerald-500 text-white shadow-lg shadow-emerald-500/20'
                         : 'bg-white/5 border-white/10 text-slate-300 hover:bg-white/10'
@@ -997,7 +1107,7 @@ export default function PatientAppointments() {
                     <input
                       type="date"
                       value={bookingDate}
-                      min={new Date().toISOString().split('T')[0]}
+                      min={safeDateOnly(new Date().toISOString())}
                       onChange={(e) => setBookingDate(e.target.value)}
                       className="px-3.5 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50"
                     />
@@ -1020,7 +1130,7 @@ export default function PatientAppointments() {
                   {isLoadingSlots ? (
                     <div className="p-8 text-center text-slate-400 border border-white/5 rounded-2xl glass animate-pulse">
                       <Clock size={28} className="mx-auto mb-2 text-blue-400 animate-spin" />
-                      <p className="text-xs">Computing genuine availability for {selectedDoctor?.full_name}...</p>
+                      <p className="text-xs">Computing genuine availability for {selectedDoctor?.full_name || selectedDoctor?.name || 'physician'}...</p>
                     </div>
                   ) : availability?.status === 'unconfigured' ? (
                     <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm space-y-2">
@@ -1045,7 +1155,7 @@ export default function PatientAppointments() {
                                 key={d}
                                 type="button"
                                 onClick={() => setBookingDate(d)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/30 transition-all"
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/30 transition-all cursor-pointer"
                               >
                                 {d}
                               </button>
@@ -1064,7 +1174,7 @@ export default function PatientAppointments() {
                             type="button"
                             disabled={!slot.is_available}
                             onClick={() => setSelectedSlot(slot)}
-                            className={`p-2.5 rounded-xl text-xs font-semibold border transition-all text-center ${
+                            className={`p-2.5 rounded-xl text-xs font-semibold border transition-all text-center cursor-pointer ${
                               !slot.is_available
                                 ? 'bg-white/[0.02] border-white/5 text-slate-500 cursor-not-allowed line-through'
                                 : isSelected
@@ -1139,9 +1249,11 @@ export default function PatientAppointments() {
                 <div className="glass p-5 rounded-2xl border border-white/10 space-y-3.5">
                   <div className="flex items-center justify-between pb-3 border-b border-white/10">
                     <div>
-                      <h4 className="font-bold text-white text-base">{selectedDoctor?.full_name}</h4>
+                      <h4 className="font-bold text-white text-base">
+                        {selectedDoctor?.full_name || selectedDoctor?.name || 'Physician'}
+                      </h4>
                       <p className="text-xs text-slate-400">
-                        {selectedDoctor?.specialty} • {selectedDoctor?.department}
+                        {selectedDoctor?.specialty || 'General'} • {selectedDoctor?.department || 'Clinic'}
                       </p>
                     </div>
                     <span
@@ -1239,14 +1351,14 @@ export default function PatientAppointments() {
                   <button
                     type="button"
                     onClick={() => downloadCalendarInvite(confirmedBooking)}
-                    className="btn-secondary text-xs inline-flex items-center gap-2 w-full sm:w-auto justify-center"
+                    className="btn-secondary text-xs inline-flex items-center gap-2 w-full sm:w-auto justify-center cursor-pointer"
                   >
                     <Download size={14} /> Download .ics Calendar File
                   </button>
                   <button
                     type="button"
                     onClick={handleCloseWizard}
-                    className="btn-primary text-xs w-full sm:w-auto justify-center"
+                    className="btn-primary text-xs w-full sm:w-auto justify-center cursor-pointer"
                   >
                     Done / View in Appointments
                   </button>
@@ -1261,7 +1373,7 @@ export default function PatientAppointments() {
                   <button
                     type="button"
                     onClick={() => setWizardStep((prev) => prev - 1)}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/5 border border-white/10 transition-all flex items-center gap-1.5"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-300 hover:bg-white/5 border border-white/10 transition-all flex items-center gap-1.5 cursor-pointer"
                   >
                     <ChevronLeft size={16} /> Back
                   </button>
@@ -1269,7 +1381,7 @@ export default function PatientAppointments() {
                   <button
                     type="button"
                     onClick={handleCloseWizard}
-                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+                    className="px-4 py-2 rounded-xl text-xs font-semibold text-slate-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
                   >
                     Cancel
                   </button>
@@ -1290,7 +1402,7 @@ export default function PatientAppointments() {
                       }
                       setWizardStep((prev) => prev + 1)
                     }}
-                    className="btn-primary text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+                    className="btn-primary text-xs inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
                   >
                     Continue <ChevronRight size={16} />
                   </button>
@@ -1299,7 +1411,7 @@ export default function PatientAppointments() {
                     type="button"
                     disabled={isSubmittingBooking}
                     onClick={handleConfirmBooking}
-                    className="btn-primary text-xs inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/20"
+                    className="btn-primary text-xs inline-flex items-center gap-2 bg-gradient-to-r from-emerald-500 to-teal-600 shadow-emerald-500/20 cursor-pointer"
                   >
                     {isSubmittingBooking ? (
                       <>
@@ -1329,7 +1441,7 @@ export default function PatientAppointments() {
               </div>
               <button
                 onClick={() => setSelectedAppointment(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5 cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -1346,15 +1458,15 @@ export default function PatientAppointments() {
               <div className="grid grid-cols-2 gap-3">
                 <div className="p-3 rounded-xl bg-white/5 border border-white/5">
                   <span className="text-slate-400 block mb-1">Physician:</span>
-                  <span className="font-semibold text-white block">{selectedAppointment.doctor_name}</span>
-                  <span className="text-[10px] text-slate-400">{selectedAppointment.doctor_specialty}</span>
+                  <span className="font-semibold text-white block">{selectedAppointment.doctor_name || 'Assigned Physician'}</span>
+                  <span className="text-[10px] text-slate-400">{selectedAppointment.doctor_specialty || 'General'}</span>
                 </div>
                 <div className="p-3 rounded-xl bg-white/5 border border-white/5">
                   <span className="text-slate-400 block mb-1">Status:</span>
                   <span className="font-semibold text-white uppercase block">
-                    {selectedAppointment.status}
+                    {selectedAppointment.status || 'Scheduled'}
                   </span>
-                  <span className="text-[10px] text-slate-400">{selectedAppointment.appointment_type}</span>
+                  <span className="text-[10px] text-slate-400">{selectedAppointment.appointment_type || 'In-Person'}</span>
                 </div>
               </div>
 
@@ -1390,7 +1502,7 @@ export default function PatientAppointments() {
 
               <div className="p-3 rounded-xl bg-white/5 border border-white/5">
                 <span className="text-slate-400 block mb-1">Medical Reason:</span>
-                <p className="text-slate-200">{selectedAppointment.reason}</p>
+                <p className="text-slate-200">{selectedAppointment.reason || 'Routine consultation'}</p>
               </div>
 
               {selectedAppointment.cancellation_reason && (
@@ -1407,25 +1519,25 @@ export default function PatientAppointments() {
                 onClick={() =>
                   downloadCalendarInvite({
                     reference: selectedAppointment.booking_reference || 'REF-MC',
-                    doctorName: selectedAppointment.doctor_name,
-                    specialty: selectedAppointment.doctor_specialty,
+                    doctorName: selectedAppointment.doctor_name || 'Physician',
+                    specialty: selectedAppointment.doctor_specialty || 'General Practice',
                     scheduledAt: selectedAppointment.scheduled_at,
                     durationMinutes: selectedAppointment.duration_minutes || 30,
                     location:
                       selectedAppointment.appointment_type === 'telehealth'
                         ? 'Virtual Care Room'
-                        : selectedAppointment.room || selectedAppointment.doctor_location,
-                    reason: selectedAppointment.reason,
+                        : selectedAppointment.room || selectedAppointment.doctor_location || 'Clinic',
+                    reason: selectedAppointment.reason || 'Medical consultation',
                   })
                 }
-                className="btn-secondary text-xs inline-flex items-center gap-1.5"
+                className="btn-secondary text-xs inline-flex items-center gap-1.5 cursor-pointer"
               >
                 <Download size={14} /> Download Invite (.ics)
               </button>
               <button
                 type="button"
                 onClick={() => setSelectedAppointment(null)}
-                className="btn-primary text-xs"
+                className="btn-primary text-xs cursor-pointer"
               >
                 Close
               </button>
@@ -1445,7 +1557,7 @@ export default function PatientAppointments() {
               </div>
               <button
                 onClick={() => setReschedulingAppt(null)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5"
+                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5 cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -1453,7 +1565,7 @@ export default function PatientAppointments() {
 
             <p className="text-xs text-slate-300">
               Select a new date and open slot for your consultation with{' '}
-              <span className="font-bold text-white">{reschedulingAppt.doctor_name}</span>:
+              <span className="font-bold text-white">{reschedulingAppt.doctor_name || 'your physician'}</span>:
             </p>
 
             <div className="space-y-3">
@@ -1464,7 +1576,7 @@ export default function PatientAppointments() {
                 <input
                   type="date"
                   value={rescheduleDate}
-                  min={new Date().toISOString().split('T')[0]}
+                  min={safeDateOnly(new Date().toISOString())}
                   onChange={(e) => setRescheduleDate(e.target.value)}
                   className="w-full px-3.5 py-2 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50"
                 />
@@ -1490,7 +1602,7 @@ export default function PatientAppointments() {
                           type="button"
                           disabled={!slot.is_available}
                           onClick={() => setRescheduleSlot(slot)}
-                          className={`p-2 rounded-xl text-xs font-semibold border transition-all text-center ${
+                          className={`p-2 rounded-xl text-xs font-semibold border transition-all text-center cursor-pointer ${
                             !slot.is_available
                               ? 'bg-white/[0.02] border-white/5 text-slate-500 cursor-not-allowed line-through'
                               : isSelected
@@ -1515,7 +1627,7 @@ export default function PatientAppointments() {
               <button
                 type="button"
                 onClick={() => setReschedulingAppt(null)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
               >
                 Cancel
               </button>
@@ -1523,7 +1635,7 @@ export default function PatientAppointments() {
                 type="button"
                 disabled={!rescheduleSlot || isSubmittingReschedule}
                 onClick={handleConfirmReschedule}
-                className="btn-primary text-xs disabled:opacity-40"
+                className="btn-primary text-xs disabled:opacity-40 cursor-pointer"
               >
                 {isSubmittingReschedule ? 'Rescheduling...' : 'Confirm Reschedule'}
               </button>
@@ -1548,7 +1660,7 @@ export default function PatientAppointments() {
 
             <p className="text-xs text-slate-300">
               Are you sure you want to cancel your consultation with{' '}
-              <span className="font-bold text-white">{cancellingAppt.doctor_name}</span> on{' '}
+              <span className="font-bold text-white">{cancellingAppt.doctor_name || 'your physician'}</span> on{' '}
               <span className="font-bold text-white">{formatDateDisplay(cancellingAppt.scheduled_at)}</span>?
             </p>
 
@@ -1569,7 +1681,7 @@ export default function PatientAppointments() {
               <button
                 type="button"
                 onClick={() => setCancellingAppt(null)}
-                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all"
+                className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer"
               >
                 Keep Appointment
               </button>
@@ -1577,7 +1689,7 @@ export default function PatientAppointments() {
                 type="button"
                 disabled={isCancelling}
                 onClick={handleConfirmCancel}
-                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 transition-all disabled:opacity-40"
+                className="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/30 transition-all disabled:opacity-40 cursor-pointer"
               >
                 {isCancelling ? 'Cancelling...' : 'Confirm Cancellation'}
               </button>

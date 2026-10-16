@@ -257,7 +257,7 @@ export default function MedicalReportAnalysis() {
     }
 
     // Check type
-    const ext = file.name.split('.').pop()?.toLowerCase()
+    const ext = (file?.name || '').split('.').pop()?.toLowerCase()
     if (!['pdf', 'jpg', 'jpeg', 'png'].includes(ext || '')) {
       setUploadError(`Unsupported file format '.${ext}'. Please upload a PDF, JPG, JPEG, or PNG document.`)
       return

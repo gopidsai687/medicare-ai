@@ -126,18 +126,18 @@ export default function PatientMedicalRecords() {
         if (res.data && Array.isArray(res.data) && res.data.length > 0) {
           const apiRecords: MedicalRecordItem[] = res.data.map((r: any) => ({
             id: r.id,
-            category: (r.category.charAt(0).toUpperCase() + r.category.slice(1).toLowerCase()) as any,
-            title: r.title,
+            category: (((r.category || 'general').charAt(0).toUpperCase() + (r.category || 'general').slice(1).toLowerCase())) as any,
+            title: r.title || 'Medical Record',
             icd10: r.icd10_code || undefined,
             date: r.record_date || new Date().toISOString().split('T')[0],
             provider: 'Dr. Physician (Assigned)',
-            status: (r.status.charAt(0).toUpperCase() + r.status.slice(1).toLowerCase()) as any,
+            status: (((r.status || 'active').charAt(0).toUpperCase() + (r.status || 'active').slice(1).toLowerCase())) as any,
             severity: 'Moderate',
             description: r.description || '',
             notes: r.notes || undefined,
           }))
-          const existingTitles = new Set(apiRecords.map(r => r.title.toLowerCase()))
-          const nonDupeDemo = INITIAL_RECORDS.filter(r => !existingTitles.has(r.title.toLowerCase()))
+          const existingTitles = new Set(apiRecords.map(r => (r.title || '').toLowerCase()))
+          const nonDupeDemo = INITIAL_RECORDS.filter(r => !existingTitles.has((r.title || '').toLowerCase()))
           setRecords([...apiRecords, ...nonDupeDemo])
           setIsLive(true)
         }

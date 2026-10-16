@@ -221,7 +221,7 @@ export default function DoctorEncounters() {
                   className="px-2.5 py-2 rounded-xl text-xs bg-white/5 hover:bg-white/10 text-blue-300 border border-white/10 flex-1 truncate transition-all disabled:opacity-50"
                   title={t.name}
                 >
-                  {t.name.split(' ')[0]}
+                  {(t.name || 'Template').split(' ')[0]}
                 </button>
               ))}
             </div>

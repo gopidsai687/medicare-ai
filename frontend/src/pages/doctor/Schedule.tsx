@@ -108,7 +108,9 @@ export default function DoctorSchedule() {
           }
           const mapped: ScheduleSlot[] = data.map((a: any) => ({
             id: a.id,
-            time: new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }),
+            time: a.scheduled_at && !isNaN(new Date(a.scheduled_at).getTime())
+              ? new Date(a.scheduled_at).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+              : '09:00 AM',
             patient: a.patient_name || a.patient?.user?.full_name || 'Assigned Patient',
             type: a.appointment_type === 'telehealth' ? 'Telehealth Consult' : a.appointment_type === 'follow_up' ? 'Follow-up' : a.appointment_type === 'urgent' ? 'Urgent Add-on' : 'In-Person Consult',
             reason: a.reason,

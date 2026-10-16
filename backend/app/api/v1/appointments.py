@@ -163,9 +163,11 @@ async def list_booking_doctors(
         next_dates = await availability_service.get_next_available_dates(db, d.id, date.today(), count=1)
         earliest = next_dates[0] if next_dates else None
 
+        doc_name = d.user.full_name if d.user else "Physician"
         profiles.append(DoctorProfileRead(
             id=d.id,
-            name=d.user.full_name if d.user else "Physician",
+            name=doc_name,
+            full_name=doc_name,
             specialty=d.specialty,
             department=d.department or "Clinical Services",
             office_location=d.office_location or "Main Pavilion",

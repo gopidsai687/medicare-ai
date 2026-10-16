@@ -125,11 +125,13 @@ export default function AdminAppointments() {
             mrn: a.patient_mrn || a.patient?.mrn || '',
             doctorName: a.doctor_name || a.doctor?.user?.full_name || 'Unknown Doctor',
             department: a.doctor_department || a.doctor?.department || 'General',
-            dateTime: new Date(a.scheduled_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+            dateTime: a.scheduled_at && !isNaN(new Date(a.scheduled_at).getTime())
+              ? new Date(a.scheduled_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+              : 'Date Pending',
             type: a.appointment_type === 'telehealth' ? 'TELEHEALTH' : 'IN_PERSON',
             room: a.room ?? '—',
-            status: a.status.toUpperCase() as AdminAppointment['status'],
-            reason: a.reason,
+            status: (a.status ? a.status.toUpperCase() : 'SCHEDULED') as AdminAppointment['status'],
+            reason: a.reason || 'Medical consultation',
           }))
           setAppointments(mapped)
           setIsLive(true)

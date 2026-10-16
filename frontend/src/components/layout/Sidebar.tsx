@@ -132,14 +132,14 @@ export function Sidebar() {
             display: 'flex', alignItems: 'center', justifyContent: 'center',
             fontSize: '0.7rem', fontWeight: 700, color: 'white',
           }}>
-            {getInitials(user.full_name)}
+            {getInitials(user?.full_name)}
           </div>
           <div style={{ overflow: 'hidden' }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 600, color: '#c0d4ed', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.full_name}
+              {user?.full_name || 'User'}
             </div>
             <div style={{ fontSize: '0.7rem', color: '#3a5070', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user.email}
+              {user?.email || ''}
             </div>
           </div>
         </div>

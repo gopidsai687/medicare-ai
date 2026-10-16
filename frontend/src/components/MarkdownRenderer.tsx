@@ -7,7 +7,7 @@ interface MarkdownRendererProps {
 
 export function MarkdownRenderer({ content, className = '' }: MarkdownRendererProps) {
   // Parse simple markdown lines: headers (###, ##), bullets (•, -, *), bold (**text**), italics (_text_)
-  const lines = content.split('\n')
+  const lines = (content || '').split('\n')
 
   return (
     <div className={`space-y-1.5 text-xs leading-relaxed ${className}`}>
