@@ -21,10 +21,12 @@ from httpx import AsyncClient, ASGITransport
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from sqlalchemy import delete
 from app.main import app
 from app.core.database import AsyncSessionFactory, engine
 from app.core.seed import seed_initial_data
 from app.models.base import Base
+from app.models.appointment import Appointment
 
 
 @pytest.fixture(scope="module")
@@ -435,4 +437,187 @@ async def test_resilient_appointment_and_doctor_schema():
             },
         )
         assert short_book_resp.status_code == 422, "Reason shorter than 5 chars must be rejected with 422"
+
+
+@pytest.mark.asyncio
+async def test_doctor_maria_lopez_saturday_schedule_and_booking_workflow():
+    """
+    Validates:
+    1. Clean doctor name formatting (strictly 'Dr. Maria Lopez, MD', no 'Dr. Dr.').
+    2. Legitimate Saturday demonstration clinic shifts for Dr. Maria Lopez (2026-10-17).
+    3. Availability calculation returns valid open slots with correct 30-min duration, label, and timezone.
+    4. Successful real booking on Saturday with unique booking reference.
+    5. Atomic double-booking rejection (HTTP 409 Conflict) when a second patient tries to claim the same slot.
+    6. Non-working day (Sunday 2026-10-18) returns 'unconfigured' with clean message and suggested dates.
+    7. Admin schedule endpoints: authorized admin can view/manage schedules, unauthorized patient is forbidden.
+    8. Cancellation frees up the slot and records the cancellation reason.
+    """
+    async with AsyncSessionFactory() as session:
+        await seed_initial_data(session)
+        # Ensure test isolation: clean up any pre-existing appointments on test date
+        await session.execute(
+            delete(Appointment).where(
+                Appointment.scheduled_at >= datetime(2026, 10, 17, 0, 0, 0),
+                Appointment.scheduled_at < datetime(2026, 10, 18, 0, 0, 0),
+            )
+        )
+        await session.commit()
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Authenticate Alice (Patient), Bob (Patient 2), and Vance (Admin)
+        res_alice = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "alice.johnson@medicare.ai", "password": "PatientPass123!"},
+        )
+        assert res_alice.status_code == 200
+        alice_headers = {"Authorization": f"Bearer {res_alice.json()['access_token']}"}
+
+        res_bob = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "bob.smith@medicare.ai", "password": "PatientPass123!"},
+        )
+        assert res_bob.status_code == 200
+        bob_headers = {"Authorization": f"Bearer {res_bob.json()['access_token']}"}
+
+        res_adm = await client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin@medicare.ai", "password": "AdminPass123!"},
+        )
+        assert res_adm.status_code == 200
+        adm_headers = {"Authorization": f"Bearer {res_adm.json()['access_token']}"}
+
+        # 1. Fetch Doctors and find Dr. Maria Lopez
+        doc_resp = await client.get("/api/v1/appointments/doctors", headers=alice_headers)
+        assert doc_resp.status_code == 200
+        doctors = doc_resp.json()
+        dr_lopez = next((d for d in doctors if "Lopez" in d["name"]), None)
+        assert dr_lopez is not None, "Dr. Maria Lopez must be in seeded doctors list"
+
+        # Verify clean name formatting (no 'Dr. Dr.')
+        assert dr_lopez["name"] == "Dr. Maria Lopez, MD"
+        assert not dr_lopez["name"].startswith("Dr. Dr.")
+        assert "SAT" in dr_lopez["working_days"], "Dr. Maria Lopez must have SAT in working days"
+
+        # 2. Check Saturday availability: October 17, 2026
+        sat_resp = await client.get(
+            f"/api/v1/appointments/availability?doctor_id={dr_lopez['id']}&date=2026-10-17",
+            headers=alice_headers,
+        )
+        assert sat_resp.status_code == 200
+        sat_data = sat_resp.json()
+        assert sat_data["status"] == "available"
+        assert sat_data["doctor_name"] == "Dr. Maria Lopez, MD"
+        assert "dr. dr." not in sat_data["message"].lower()
+        assert sat_data["clinic_timezone"] == "America/New_York"
+        assert sat_data["slot_duration_minutes"] == 30
+        assert sat_data["available_count"] > 0
+        slots = sat_data["slots"]
+        assert len(slots) >= 5
+        # Verify first Saturday slot is 09:00
+        assert slots[0]["start_time"] == "09:00"
+        assert slots[0]["time_display"] == "09:00 AM"
+        assert slots[0]["label"] == "09:00 AM"
+        assert slots[0]["duration_minutes"] == 30
+        assert slots[0]["is_available"] is True
+
+        # 3. Successful real booking on Saturday
+        target_slot = slots[0]
+        book_resp = await client.post(
+            "/api/v1/appointments",
+            headers=alice_headers,
+            json={
+                "doctor_id": dr_lopez["id"],
+                "scheduled_at": target_slot["iso_datetime"],
+                "appointment_type": "in_person",
+                "reason": "Comprehensive Annual Health Checkup and Preventive Review",
+            },
+        )
+        assert book_resp.status_code == 201
+        booking = book_resp.json()
+        assert booking["status"] == "confirmed"
+        assert booking["doctor_name"] == "Dr. Maria Lopez, MD"
+        assert not booking["doctor_name"].startswith("Dr. Dr.")
+        assert booking["booking_reference"].startswith("MC-2026-")
+
+        # 4. Atomic Double-Booking Rejection (Bob attempts to book the exact same slot)
+        conflict_resp = await client.post(
+            "/api/v1/appointments",
+            headers=bob_headers,
+            json={
+                "doctor_id": dr_lopez["id"],
+                "scheduled_at": target_slot["iso_datetime"],
+                "appointment_type": "in_person",
+                "reason": "Walk-in consultation attempt during reserved slot",
+            },
+        )
+        assert conflict_resp.status_code == 409
+        assert "no longer available" in conflict_resp.json()["detail"].lower()
+
+        # 5. Verify availability recheck shows the slot as booked
+        recheck_resp = await client.get(
+            f"/api/v1/appointments/availability?doctor_id={dr_lopez['id']}&date=2026-10-17",
+            headers=alice_headers,
+        )
+        assert recheck_resp.status_code == 200
+        recheck_slots = recheck_resp.json()["slots"]
+        booked_slot = next(s for s in recheck_slots if s["start_time"] == target_slot["start_time"])
+        assert booked_slot["is_available"] is False
+        assert booked_slot["reason"] == "Already reserved"
+
+        # 6. Check unconfigured day (Sunday 2026-10-18)
+        sun_resp = await client.get(
+            f"/api/v1/appointments/availability?doctor_id={dr_lopez['id']}&date=2026-10-18",
+            headers=alice_headers,
+        )
+        assert sun_resp.status_code == 200
+        sun_data = sun_resp.json()
+        assert sun_data["status"] == "unconfigured"
+        assert sun_data["doctor_name"] == "Dr. Maria Lopez, MD"
+        assert "dr. dr." not in sun_data["message"].lower()
+        assert "sundays" in sun_data["message"].lower()
+        assert len(sun_data["suggested_dates"]) > 0
+        assert "2026-10-19" in sun_data["suggested_dates"]
+
+        # 7. Admin Schedule Management Endpoints
+        sched_resp = await client.get(
+            f"/api/v1/appointments/schedules/{dr_lopez['id']}",
+            headers=adm_headers,
+        )
+        assert sched_resp.status_code == 200
+        scheds = sched_resp.json()
+        assert len(scheds) >= 6  # Mon through Sat
+        assert any(s["day_of_week"] == "SAT" for s in scheds)
+
+        # Patient cannot modify doctor schedules (HTTP 403)
+        unauth_sched = await client.post(
+            "/api/v1/appointments/schedules",
+            headers=alice_headers,
+            json={
+                "doctor_id": dr_lopez["id"],
+                "day_of_week": "SUN",
+                "start_time": "10:00:00",
+                "end_time": "14:00:00",
+                "slot_duration_minutes": 30,
+            },
+        )
+        assert unauth_sched.status_code == 403
+
+        # 8. Cancellation workflow
+        cancel_resp = await client.delete(
+            f"/api/v1/appointments/{booking['id']}/cancel",
+            headers=alice_headers,
+        )
+        assert cancel_resp.status_code == 200
+        assert cancel_resp.json()["status"] == "cancelled"
+
+        # Verify slot is freed after cancellation
+        freed_resp = await client.get(
+            f"/api/v1/appointments/availability?doctor_id={dr_lopez['id']}&date=2026-10-17",
+            headers=alice_headers,
+        )
+        freed_slots = freed_resp.json()["slots"]
+        target_reopened = next(s for s in freed_slots if s["start_time"] == target_slot["start_time"])
+        assert target_reopened["is_available"] is True
+
 

@@ -69,6 +69,8 @@ export interface DoctorItem {
   consultation_duration?: number
   accepts_telehealth?: boolean
   has_schedule?: boolean
+  working_days?: string[]
+  earliest_available_date?: string
 }
 
 export interface TimeSlot {
@@ -77,6 +79,9 @@ export interface TimeSlot {
   is_available: boolean
   duration_minutes: number
   label: string
+  time_display?: string
+  iso_datetime?: string
+  reason?: string
 }
 
 export interface AvailabilityData {
@@ -84,16 +89,30 @@ export interface AvailabilityData {
   doctor_name: string
   date: string
   clinic_timezone: string
-  status: 'available' | 'booked' | 'off_duty' | 'unconfigured'
+  status: 'available' | 'booked' | 'fully_booked' | 'off_duty' | 'unconfigured' | 'time_off' | 'unsupported_type'
   message: string
   slots: TimeSlot[]
   suggested_dates: string[]
+  available_count?: number
+  total_count?: number
+  slot_duration_minutes?: number
+}
+
+// Helper to safely format doctor display names and prevent "Dr. Dr." repetition
+export function cleanDoctorName(rawName?: string | null): string {
+  if (!rawName || typeof rawName !== 'string') return 'Dr. Physician'
+  let name = rawName.trim()
+  while (/^dr\.?\s+/i.test(name)) {
+    name = name.replace(/^dr\.?\s+/i, '').trim()
+  }
+  return `Dr. ${name}`
 }
 
 // Helper to safely extract initials without crashing on undefined/null
 function getDoctorInitials(name?: string | null): string {
   if (!name || typeof name !== 'string') return 'MD'
-  const parts = name.trim().split(/\s+/).filter(Boolean)
+  const cleaned = cleanDoctorName(name).replace(/^dr\.?\s+/i, '').trim()
+  const parts = cleaned.split(/\s+/).filter(Boolean)
   if (parts.length === 0) return 'MD'
   return parts.map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 }
@@ -231,7 +250,7 @@ export default function PatientAppointments() {
     return {
       id: String(raw?.id || fallbackId),
       doctor_id: String(raw?.doctor_id || ''),
-      doctor_name: raw?.doctor_name || raw?.doctor?.user?.full_name || raw?.doctor?.name || 'Assigned Physician',
+      doctor_name: cleanDoctorName(raw?.doctor_name || raw?.doctor?.user?.full_name || raw?.doctor?.name || 'Assigned Physician'),
       doctor_specialty: raw?.doctor_specialty || raw?.doctor?.specialty || 'General Practice',
       doctor_department: raw?.doctor_department || raw?.doctor?.department || 'Outpatient Clinic',
       doctor_location: raw?.doctor_location || raw?.room || raw?.doctor?.office_location || 'Main Clinic Pavilion',
@@ -306,8 +325,8 @@ export default function PatientAppointments() {
         if (res.data && Array.isArray(res.data)) {
           const mappedDocs: DoctorItem[] = res.data.map((d: any) => ({
             id: String(d.id || ''),
-            name: d.name || d.full_name || 'Physician',
-            full_name: d.full_name || d.name || 'Physician',
+            name: cleanDoctorName(d.name || d.full_name || 'Physician'),
+            full_name: cleanDoctorName(d.full_name || d.name || 'Physician'),
             specialty: d.specialty || 'General Practice',
             department: d.department || 'Clinical Services',
             office_location: d.office_location || 'Main Pavilion',
@@ -316,10 +335,15 @@ export default function PatientAppointments() {
             consultation_duration: Number(d.consultation_duration || 30),
             accepts_telehealth: d.accepts_telehealth ?? true,
             has_schedule: Boolean(d.has_schedule ?? true),
+            working_days: Array.isArray(d.working_days) ? d.working_days : [],
+            earliest_available_date: d.earliest_available_date || undefined,
           }))
           setDoctors(mappedDocs)
           if (mappedDocs.length > 0) {
             setSelectedDoctor(mappedDocs[0])
+            if (mappedDocs[0].earliest_available_date) {
+              setBookingDate(mappedDocs[0].earliest_available_date)
+            }
           } else {
             setSelectedDoctor(null)
           }
@@ -346,16 +370,40 @@ export default function PatientAppointments() {
         },
       })
         .then((res) => {
-          setAvailability(res.data)
+          const raw = res.data
+          setAvailability({
+            doctor_id: raw.doctor_id,
+            doctor_name: cleanDoctorName(raw.doctor_name),
+            date: raw.date,
+            clinic_timezone: raw.clinic_timezone || 'America/New_York',
+            status: raw.status,
+            message: raw.message,
+            available_count: raw.available_count,
+            total_count: raw.total_count,
+            slot_duration_minutes: raw.slot_duration_minutes || 30,
+            slots: Array.isArray(raw.slots)
+              ? raw.slots.map((s: any) => ({
+                  start_time: s.start_time,
+                  end_time: s.end_time,
+                  is_available: Boolean(s.is_available),
+                  duration_minutes: s.duration_minutes || raw.slot_duration_minutes || 30,
+                  label: s.label || s.time_display || s.start_time,
+                  time_display: s.time_display || s.label || s.start_time,
+                  iso_datetime: s.iso_datetime,
+                  reason: s.reason,
+                }))
+              : [],
+            suggested_dates: Array.isArray(raw.suggested_dates) ? raw.suggested_dates : [],
+          })
         })
-        .catch(() => {
+        .catch((err) => {
           setAvailability({
             doctor_id: selectedDoctor.id,
-            doctor_name: selectedDoctor.full_name || selectedDoctor.name || 'Physician',
+            doctor_name: cleanDoctorName(selectedDoctor.full_name || selectedDoctor.name || 'Physician'),
             date: bookingDate,
             clinic_timezone: 'America/New_York',
             status: 'unconfigured',
-            message: 'Physician shift schedules not configured for this date.',
+            message: err.response?.data?.detail || 'Physician shift schedules not configured for this date.',
             slots: [],
             suggested_dates: [],
           })
@@ -377,7 +425,33 @@ export default function PatientAppointments() {
           date: rescheduleDate,
         },
       })
-        .then((res) => setRescheduleAvailability(res.data))
+        .then((res) => {
+          const raw = res.data
+          setRescheduleAvailability({
+            doctor_id: raw.doctor_id,
+            doctor_name: cleanDoctorName(raw.doctor_name),
+            date: raw.date,
+            clinic_timezone: raw.clinic_timezone || 'America/New_York',
+            status: raw.status,
+            message: raw.message,
+            available_count: raw.available_count,
+            total_count: raw.total_count,
+            slot_duration_minutes: raw.slot_duration_minutes || 30,
+            slots: Array.isArray(raw.slots)
+              ? raw.slots.map((s: any) => ({
+                  start_time: s.start_time,
+                  end_time: s.end_time,
+                  is_available: Boolean(s.is_available),
+                  duration_minutes: s.duration_minutes || raw.slot_duration_minutes || 30,
+                  label: s.label || s.time_display || s.start_time,
+                  time_display: s.time_display || s.label || s.start_time,
+                  iso_datetime: s.iso_datetime,
+                  reason: s.reason,
+                }))
+              : [],
+            suggested_dates: Array.isArray(raw.suggested_dates) ? raw.suggested_dates : [],
+          })
+        })
         .catch(() => setRescheduleAvailability(null))
         .finally(() => setIsLoadingRescheduleSlots(false))
     }
@@ -464,9 +538,10 @@ export default function PatientAppointments() {
 
     setIsSubmittingBooking(true)
     try {
+      const targetScheduledAt = selectedSlot.iso_datetime || `${bookingDate}T${selectedSlot.start_time}:00`
       const payload = {
         doctor_id: selectedDoctor.id,
-        scheduled_at: selectedSlot.start_time,
+        scheduled_at: targetScheduledAt,
         appointment_type: visitType,
         reason: visitReason.trim(),
         room: visitType === 'telehealth' ? 'Virtual Care Room' : selectedDoctor.office_location || 'Main Clinic',
@@ -475,7 +550,7 @@ export default function PatientAppointments() {
       const res = await api.post('/api/v1/appointments', payload)
       const newAppt = res.data
 
-      const doctorDisplayName = selectedDoctor.full_name || selectedDoctor.name || 'Physician'
+      const doctorDisplayName = cleanDoctorName(selectedDoctor.full_name || selectedDoctor.name || 'Physician')
 
       setConfirmedBooking({
         reference: newAppt.booking_reference || `MC-2026-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -484,16 +559,16 @@ export default function PatientAppointments() {
         department: selectedDoctor.department || 'Outpatient Clinic',
         location: newAppt.room || selectedDoctor.office_location || 'Main Clinic Pavilion',
         date: bookingDate,
-        time: selectedSlot.label,
+        time: selectedSlot.label || selectedSlot.time_display || selectedSlot.start_time,
         type: visitType === 'telehealth' ? 'Telehealth Consultation' : 'In-Person Consultation',
         reason: visitReason.trim(),
-        scheduledAt: selectedSlot.start_time,
+        scheduledAt: targetScheduledAt,
         durationMinutes: selectedSlot.duration_minutes || 30,
       })
 
       success(
         'Appointment Confirmed',
-        `Booked with ${doctorDisplayName} for ${new Date(selectedSlot.start_time).toLocaleDateString()}`
+        `Booked with ${doctorDisplayName} for ${bookingDate}`
       )
 
       fetchAppointments()
@@ -519,8 +594,9 @@ export default function PatientAppointments() {
 
     setIsSubmittingReschedule(true)
     try {
+      const targetRescheduleAt = rescheduleSlot.iso_datetime || `${rescheduleDate}T${rescheduleSlot.start_time}:00`
       await api.post(`/api/v1/appointments/${reschedulingAppt.id}/reschedule`, {
-        new_scheduled_at: rescheduleSlot.start_time,
+        new_scheduled_at: targetRescheduleAt,
       })
 
       success('Appointment Rescheduled', 'Your appointment has been successfully updated.')
@@ -992,14 +1068,19 @@ export default function PatientAppointments() {
                     </div>
                   ) : (
                     doctors.map((doc) => {
-                      const docName = doc.full_name || doc.name || 'Physician'
+                      const docName = cleanDoctorName(doc.full_name || doc.name || 'Physician')
                       const isSelected = selectedDoctor?.id === doc.id
 
                       return (
                         <button
                           key={doc.id}
                           type="button"
-                          onClick={() => setSelectedDoctor(doc)}
+                          onClick={() => {
+                            setSelectedDoctor(doc)
+                            if (doc.earliest_available_date) {
+                              setBookingDate(doc.earliest_available_date)
+                            }
+                          }}
                           className={`w-full p-4 rounded-2xl border text-left transition-all flex items-center justify-between gap-4 cursor-pointer ${
                             isSelected
                               ? 'bg-blue-600/20 border-blue-500 shadow-md shadow-blue-500/20'
@@ -1017,13 +1098,18 @@ export default function PatientAppointments() {
                                   {doc.specialty || 'General'}
                                 </span>
                               </div>
-                              <p className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
+                              <p className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-3">
                                 <span className="flex items-center gap-1">
                                   <Building size={12} className="text-slate-500" /> {doc.office_location || 'Main Pavilion'}
                                 </span>
                                 <span className="flex items-center gap-1">
                                   <Clock size={12} className="text-slate-500" /> {doc.consultation_duration || 30} mins
                                 </span>
+                                {doc.working_days && doc.working_days.length > 0 && (
+                                  <span className="flex items-center gap-1 text-[11px] text-blue-300/80">
+                                    <Calendar size={11} className="text-blue-400" /> Shifts: {doc.working_days.join(', ')}
+                                  </span>
+                                )}
                               </p>
                             </div>
                           </div>
@@ -1099,7 +1185,53 @@ export default function PatientAppointments() {
             {/* ── STEP 4: Date & Available Slots ───────────────────────── */}
             {wizardStep === 4 && (
               <div className="space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                {/* Doctor Practice & Shift Info Card */}
+                <div className="p-4 rounded-2xl bg-white/5 border border-white/10 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                  <div className="flex items-center gap-3.5">
+                    <div className="w-11 h-11 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400 font-bold text-sm shrink-0">
+                      {getDoctorInitials(selectedDoctor?.full_name || selectedDoctor?.name)}
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="font-bold text-white text-sm">
+                          {cleanDoctorName(selectedDoctor?.full_name || selectedDoctor?.name)}
+                        </h4>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/10 text-blue-300 border border-blue-500/20 font-medium">
+                          {selectedDoctor?.specialty || 'General Practice'}
+                        </span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 font-medium">
+                          Demo Provider
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-3">
+                        <span>
+                          Working Days:{' '}
+                          <span className="text-slate-200 font-medium">
+                            {selectedDoctor?.working_days && selectedDoctor.working_days.length > 0
+                              ? selectedDoctor.working_days.join(', ')
+                              : 'Mon, Tue, Wed, Thu, Fri, Sat'}
+                          </span>
+                        </span>
+                        <span className="text-slate-500">•</span>
+                        <span>{selectedDoctor?.office_location || 'East Pavilion Clinic 2A'}</span>
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="text-xs text-slate-400 sm:text-right border-t sm:border-t-0 pt-2 sm:pt-0 border-white/5">
+                    <div>
+                      <span className="text-slate-400">Clinic Timezone:</span>{' '}
+                      <span className="text-blue-300 font-semibold">
+                        {availability?.clinic_timezone || 'America/New_York (EDT)'}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-400 mt-0.5">
+                      Consultation: {availability?.slot_duration_minutes || selectedDoctor?.consultation_duration || 30} mins
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1">
                       Choose Consultation Date
@@ -1113,51 +1245,73 @@ export default function PatientAppointments() {
                     />
                   </div>
 
-                  {availability && (
-                    <div className="text-xs text-slate-400 sm:text-right">
-                      <span className="font-semibold text-slate-300">Clinic Timezone:</span>{' '}
-                      {availability.clinic_timezone || 'America/New_York (EDT)'}
-                    </div>
-                  )}
+                  <div className="text-xs text-slate-400 sm:text-right">
+                    <span className="font-semibold text-slate-300">Selected Date:</span>{' '}
+                    <span className="text-slate-200">
+                      {new Date(bookingDate + 'T12:00:00').toLocaleDateString('en-US', {
+                        weekday: 'long',
+                        month: 'short',
+                        day: 'numeric',
+                        year: 'numeric',
+                      })}
+                    </span>
+                  </div>
                 </div>
 
-                {/* Slots Grid */}
+                {/* Slots Grid & States */}
                 <div className="space-y-2">
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
-                    Available Time Slots
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider">
+                      Available Time Slots
+                    </label>
+                    {availability?.slots && availability.slots.length > 0 && (
+                      <span className="text-xs text-slate-400">
+                        {availability.available_count ?? availability.slots.filter(s => s.is_available).length} of {availability.total_count ?? availability.slots.length} open
+                      </span>
+                    )}
+                  </div>
 
                   {isLoadingSlots ? (
                     <div className="p-8 text-center text-slate-400 border border-white/5 rounded-2xl glass animate-pulse">
                       <Clock size={28} className="mx-auto mb-2 text-blue-400 animate-spin" />
-                      <p className="text-xs">Computing genuine availability for {selectedDoctor?.full_name || selectedDoctor?.name || 'physician'}...</p>
-                    </div>
-                  ) : availability?.status === 'unconfigured' ? (
-                    <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm space-y-2">
-                      <div className="flex items-center gap-2 font-bold">
-                        <AlertTriangle size={16} /> Availability Not Configured
-                      </div>
-                      <p className="text-xs text-amber-200/80">
-                        {availability.message || 'This physician does not currently have active shifts on this date.'}
+                      <p className="text-xs">
+                        Computing real available slots for {cleanDoctorName(selectedDoctor?.full_name || selectedDoctor?.name)} in America/New_York...
                       </p>
                     </div>
-                  ) : availability?.status === 'off_duty' || availability?.status === 'booked' ? (
-                    <div className="p-6 rounded-2xl bg-white/5 border border-white/10 text-slate-300 text-sm space-y-3">
-                      <div className="flex items-center gap-2 font-bold text-amber-400">
-                        <AlertCircle size={16} /> {availability.message}
+                  ) : availability?.status === 'unconfigured' ||
+                      availability?.status === 'time_off' ||
+                      availability?.status === 'fully_booked' ||
+                      availability?.status === 'booked' ||
+                      availability?.status === 'unsupported_type' ||
+                      (availability && availability.available_count === 0 && availability.slots.length === 0) ? (
+                    <div className="p-6 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-300 text-sm space-y-3">
+                      <div className="flex items-center gap-2 font-bold text-amber-300">
+                        <AlertTriangle size={18} />
+                        {availability?.status === 'unconfigured'
+                          ? 'Availability Not Configured'
+                          : availability?.status === 'time_off'
+                          ? 'Doctor Unavailable (Time Off / Leave)'
+                          : availability?.status === 'unsupported_type'
+                          ? 'Consultation Mode Not Offered'
+                          : 'No Slots Available On This Date'}
                       </div>
-                      {availability.suggested_dates && availability.suggested_dates.length > 0 && (
-                        <div>
-                          <p className="text-xs text-slate-400 mb-2">Next available clinic dates:</p>
+                      <p className="text-xs text-amber-200/90 leading-relaxed">
+                        {availability?.message || 'This physician does not currently have active shifts on this date.'}
+                      </p>
+                      {availability?.suggested_dates && availability.suggested_dates.length > 0 && (
+                        <div className="pt-2 border-t border-amber-500/20">
+                          <p className="text-xs text-amber-200 font-semibold mb-2">
+                            Suggested next available clinic dates:
+                          </p>
                           <div className="flex gap-2 flex-wrap">
                             {availability.suggested_dates.map((d) => (
                               <button
                                 key={d}
                                 type="button"
                                 onClick={() => setBookingDate(d)}
-                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/30 transition-all cursor-pointer"
+                                className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/30 transition-all cursor-pointer flex items-center gap-1.5"
                               >
-                                {d}
+                                <Calendar size={12} /> {d}
                               </button>
                             ))}
                           </div>
@@ -1178,13 +1332,13 @@ export default function PatientAppointments() {
                               !slot.is_available
                                 ? 'bg-white/[0.02] border-white/5 text-slate-500 cursor-not-allowed line-through'
                                 : isSelected
-                                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/30'
+                                ? 'bg-blue-600 text-white border-blue-500 shadow-md shadow-blue-500/30 ring-2 ring-blue-400/50'
                                 : 'bg-white/5 border-white/10 text-slate-200 hover:bg-blue-500/10 hover:border-blue-500/30'
                             }`}
                           >
-                            <div>{slot.label}</div>
-                            <span className="text-[10px] opacity-75 font-normal">
-                              {slot.is_available ? `${slot.duration_minutes} min` : 'Booked'}
+                            <div className="font-bold">{slot.label || slot.time_display || slot.start_time}</div>
+                            <span className="text-[10px] opacity-75 font-normal block mt-0.5">
+                              {slot.is_available ? `${slot.duration_minutes || availability.slot_duration_minutes || 30} min` : (slot.reason || 'Booked')}
                             </span>
                           </button>
                         )
@@ -1250,7 +1404,7 @@ export default function PatientAppointments() {
                   <div className="flex items-center justify-between pb-3 border-b border-white/10">
                     <div>
                       <h4 className="font-bold text-white text-base">
-                        {selectedDoctor?.full_name || selectedDoctor?.name || 'Physician'}
+                        {cleanDoctorName(selectedDoctor?.full_name || selectedDoctor?.name || 'Physician')}
                       </h4>
                       <p className="text-xs text-slate-400">
                         {selectedDoctor?.specialty || 'General'} • {selectedDoctor?.department || 'Clinic'}
@@ -1271,7 +1425,7 @@ export default function PatientAppointments() {
                     <div>
                       <span className="text-slate-400 block">Date & Time:</span>
                       <span className="font-semibold text-slate-200">
-                        {bookingDate} at {selectedSlot?.label}
+                        {bookingDate} at {selectedSlot?.label || selectedSlot?.time_display || selectedSlot?.start_time}
                       </span>
                     </div>
                     <div>
@@ -1565,7 +1719,7 @@ export default function PatientAppointments() {
 
             <p className="text-xs text-slate-300">
               Select a new date and open slot for your consultation with{' '}
-              <span className="font-bold text-white">{reschedulingAppt.doctor_name || 'your physician'}</span>:
+              <span className="font-bold text-white">{cleanDoctorName(reschedulingAppt.doctor_name || 'your physician')}</span>:
             </p>
 
             <div className="space-y-3">
@@ -1610,14 +1764,31 @@ export default function PatientAppointments() {
                               : 'bg-white/5 border-white/10 text-slate-200 hover:bg-white/10'
                           }`}
                         >
-                          {slot.label}
+                          {slot.label || slot.time_display || slot.start_time}
                         </button>
                       )
                     })}
                   </div>
                 ) : (
-                  <div className="p-4 text-center text-slate-400 border border-dashed border-white/10 rounded-xl text-xs">
-                    {rescheduleAvailability?.message || 'No available slots for this date. Try another date.'}
+                  <div className="p-4 text-center text-slate-400 border border-dashed border-white/10 rounded-xl text-xs space-y-2">
+                    <p>{rescheduleAvailability?.message || 'No available slots for this date. Try another date.'}</p>
+                    {rescheduleAvailability?.suggested_dates && rescheduleAvailability.suggested_dates.length > 0 && (
+                      <div className="pt-2 border-t border-white/10">
+                        <p className="text-[11px] text-slate-300 font-semibold mb-1.5">Next available dates:</p>
+                        <div className="flex gap-1.5 flex-wrap justify-center">
+                          {rescheduleAvailability.suggested_dates.map((d) => (
+                            <button
+                              key={d}
+                              type="button"
+                              onClick={() => setRescheduleDate(d)}
+                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-600/20 text-blue-300 hover:bg-blue-600/30 border border-blue-500/30 cursor-pointer"
+                            >
+                              {d}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1660,7 +1831,7 @@ export default function PatientAppointments() {
 
             <p className="text-xs text-slate-300">
               Are you sure you want to cancel your consultation with{' '}
-              <span className="font-bold text-white">{cancellingAppt.doctor_name || 'your physician'}</span> on{' '}
+              <span className="font-bold text-white">{cleanDoctorName(cancellingAppt.doctor_name || 'your physician')}</span> on{' '}
               <span className="font-bold text-white">{formatDateDisplay(cancellingAppt.scheduled_at)}</span>?
             </p>
 

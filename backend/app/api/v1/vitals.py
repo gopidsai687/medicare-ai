@@ -68,6 +68,7 @@ from app.schemas.vital_sign import (
     classify_blood_glucose,
     classify_blood_pressure,
 )
+from app.services.availability_service import clean_doctor_display_name
 from app.services.ai_service import ai_service
 from app.services.alert_engine import check_stale_measurements, evaluate_vital_reading
 from app.services.hospital_service import search_nearby_hospitals
@@ -1151,7 +1152,7 @@ async def get_patient_sharing_consents(
     result = []
     for consent, doctor, doc_user in rows:
         c_read = VitalSharingConsentRead.model_validate(consent)
-        c_read.doctor_name = f"Dr. {doc_user.full_name}"
+        c_read.doctor_name = clean_doctor_display_name(doc_user.full_name)
         c_read.doctor_specialty = doctor.specialty
         result.append(c_read)
     return result
@@ -1204,7 +1205,7 @@ async def grant_doctor_consent(
     await db.refresh(consent)
 
     c_read = VitalSharingConsentRead.model_validate(consent)
-    c_read.doctor_name = f"Dr. {doc_user.full_name}"
+    c_read.doctor_name = clean_doctor_display_name(doc_user.full_name)
     c_read.doctor_specialty = doctor.specialty
     return c_read
 

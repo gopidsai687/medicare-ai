@@ -28,6 +28,21 @@ DAY_OF_WEEK_MAP = {
     6: DayOfWeek.SUNDAY.value,
 }
 
+import re
+
+
+def clean_doctor_display_name(raw_name: Optional[str]) -> str:
+    """
+    Format doctor display name cleanly, removing redundant prefixes like 'Dr. Dr.'.
+    Guarantees consistent format: 'Dr. First Last, MD'.
+    """
+    if not raw_name or not str(raw_name).strip():
+        return "Dr. Physician"
+    name = str(raw_name).strip()
+    while re.match(r"^dr\.?\s+", name, re.IGNORECASE):
+        name = re.sub(r"^dr\.?\s+", "", name, count=1, flags=re.IGNORECASE).strip()
+    return f"Dr. {name}"
+
 
 class AvailabilityService:
     """Computes real, database-backed doctor slot availability with timezone awareness."""
@@ -84,7 +99,7 @@ class AvailabilityService:
                 "suggested_dates": [],
             }
 
-        doctor_name = doctor.user.full_name if doctor.user else "Physician"
+        doctor_name = clean_doctor_display_name(doctor.user.full_name if doctor.user else "Physician")
 
         # 2. Check Doctor Time Off (Vacation / Leave)
         to_stmt = select(DoctorTimeOff).where(
@@ -101,7 +116,7 @@ class AvailabilityService:
                 "doctor_name": doctor_name,
                 "date": target_date.isoformat(),
                 "status": "time_off",
-                "message": f"Dr. {doctor_name} is unavailable on this date ({time_off.reason}).",
+                "message": f"{doctor_name} is unavailable on this date ({time_off.reason}).",
                 "clinic_timezone": "America/New_York",
                 "slot_duration_minutes": 30,
                 "slots": [],
@@ -127,7 +142,7 @@ class AvailabilityService:
                 "doctor_name": doctor_name,
                 "date": target_date.isoformat(),
                 "status": "unconfigured",
-                "message": f"Availability not configured for Dr. {doctor_name} on {target_date.strftime('%A')}s.",
+                "message": f"Availability not configured for {doctor_name} on {target_date.strftime('%A')}s.",
                 "clinic_timezone": "America/New_York",
                 "slot_duration_minutes": 30,
                 "slots": [],
@@ -143,7 +158,7 @@ class AvailabilityService:
                 "doctor_name": doctor_name,
                 "date": target_date.isoformat(),
                 "status": "unsupported_type",
-                "message": f"Dr. {doctor_name} does not offer virtual telehealth appointments on {target_date.strftime('%A')}s.",
+                "message": f"{doctor_name} does not offer virtual telehealth appointments on {target_date.strftime('%A')}s.",
                 "clinic_timezone": schedule.clinic_timezone,
                 "slot_duration_minutes": schedule.slot_duration_minutes,
                 "slots": [],
@@ -218,6 +233,8 @@ class AvailabilityService:
                 "start_time": curr_dt.strftime("%H:%M"),
                 "end_time": slot_end.strftime("%H:%M"),
                 "time_display": time_display,
+                "label": time_display,
+                "duration_minutes": schedule.slot_duration_minutes,
                 "iso_datetime": curr_dt.astimezone(timezone.utc).isoformat(),
                 "is_available": is_available,
                 "reason": reason,
@@ -231,7 +248,7 @@ class AvailabilityService:
         message_val = (
             f"{available_count} of {total_count} slots available on {target_date.strftime('%A, %B %d, %Y')}."
             if available_count > 0
-            else f"All {total_count} slots are fully booked for Dr. {doctor_name} on this date."
+            else f"All {total_count} slots are fully booked for {doctor_name} on this date."
         )
 
         suggested = []

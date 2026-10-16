@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import api from '@/lib/api'
+import { cleanDoctorName } from '../patient/Appointments'
 import {
   Calendar,
   Search,
@@ -123,7 +124,7 @@ export default function AdminAppointments() {
             id: a.id,
             patientName: a.patient_name || a.patient?.user?.full_name || 'Unknown Patient',
             mrn: a.patient_mrn || a.patient?.mrn || '',
-            doctorName: a.doctor_name || a.doctor?.user?.full_name || 'Unknown Doctor',
+            doctorName: cleanDoctorName(a.doctor_name || a.doctor?.user?.full_name || 'Unknown Doctor'),
             department: a.doctor_department || a.doctor?.department || 'General',
             dateTime: a.scheduled_at && !isNaN(new Date(a.scheduled_at).getTime())
               ? new Date(a.scheduled_at).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' })

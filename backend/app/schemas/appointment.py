@@ -1,8 +1,9 @@
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field
 from app.models.appointment import AppointmentStatus, AppointmentType
+from app.models.doctor_schedule import DayOfWeek
 
 
 class AppointmentBase(BaseModel):
@@ -82,9 +83,15 @@ class DoctorSlotRead(BaseModel):
     start_time: str
     end_time: str
     time_display: str
+    label: Optional[str] = None
+    duration_minutes: Optional[int] = 30
     iso_datetime: str
     is_available: bool
     reason: Optional[str] = None
+
+    def model_post_init(self, __context) -> None:
+        if not self.label:
+            self.label = self.time_display
 
 
 class DoctorAvailabilityResponse(BaseModel):
@@ -127,4 +134,50 @@ class DoctorProfileRead(BaseModel):
             self.full_name = self.name
         elif not self.name and self.full_name:
             self.name = self.full_name
+
+
+# -----------------------------------------------------------------------------
+# Demonstration & Clinical Shift Configuration Schemas
+# -----------------------------------------------------------------------------
+
+class DoctorScheduleBase(BaseModel):
+    day_of_week: DayOfWeek
+    start_time: time
+    end_time: time
+    slot_duration_minutes: int = 30
+    is_telehealth_capable: bool = True
+    is_in_person_capable: bool = True
+    clinic_timezone: str = "America/New_York"
+    is_active: bool = True
+
+
+class DoctorScheduleCreate(DoctorScheduleBase):
+    doctor_id: uuid.UUID
+
+
+class DoctorScheduleRead(DoctorScheduleBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    doctor_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
+
+class DoctorTimeOffBase(BaseModel):
+    start_date: date
+    end_date: date
+    reason: str = "Approved Leave / Clinic Holiday"
+
+
+class DoctorTimeOffCreate(DoctorTimeOffBase):
+    doctor_id: uuid.UUID
+
+
+class DoctorTimeOffRead(DoctorTimeOffBase):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    doctor_id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime
+
 

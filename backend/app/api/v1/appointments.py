@@ -11,7 +11,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from sqlalchemy import and_, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -30,9 +30,13 @@ from app.schemas.appointment import (
     AppointmentUpdate,
     DoctorAvailabilityResponse,
     DoctorProfileRead,
+    DoctorScheduleCreate,
+    DoctorScheduleRead,
+    DoctorTimeOffCreate,
+    DoctorTimeOffRead,
     SpecialtyRead,
 )
-from app.services.availability_service import DAY_OF_WEEK_MAP, availability_service
+from app.services.availability_service import DAY_OF_WEEK_MAP, availability_service, clean_doctor_display_name
 
 router = APIRouter(prefix="/appointments", tags=["Appointments"])
 
@@ -64,7 +68,7 @@ def _enrich_appointment_read(appt: Appointment) -> AppointmentRead:
         doc_loc = appt.doctor.office_location or doc_loc
         doc_ph = appt.doctor.phone
         if appt.doctor.user:
-            doc_name = appt.doctor.user.full_name
+            doc_name = clean_doctor_display_name(appt.doctor.user.full_name)
 
     pat_name = "Patient"
     pat_mrn = ""
@@ -163,7 +167,7 @@ async def list_booking_doctors(
         next_dates = await availability_service.get_next_available_dates(db, d.id, date.today(), count=1)
         earliest = next_dates[0] if next_dates else None
 
-        doc_name = d.user.full_name if d.user else "Physician"
+        doc_name = clean_doctor_display_name(d.user.full_name if d.user else "Physician")
         profiles.append(DoctorProfileRead(
             id=d.id,
             name=doc_name,
@@ -476,9 +480,10 @@ async def reschedule_appointment(
 
 @router.delete("/{appointment_id}/cancel", response_model=AppointmentRead)
 @router.post("/{appointment_id}/cancel", response_model=AppointmentRead)
+@router.delete("/{appointment_id}", response_model=AppointmentRead)
 async def cancel_appointment(
     appointment_id: uuid.UUID,
-    payload: Optional[AppointmentCancelRequest] = None,
+    payload: Optional[AppointmentCancelRequest] = Body(None),
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -555,3 +560,151 @@ async def update_appointment(
     await db.commit()
     await db.refresh(appt)
     return _enrich_appointment_read(appt)
+
+
+# -----------------------------------------------------------------------------
+# Demonstration & Clinical Shift Configuration Endpoints (Admin / Doctor)
+# -----------------------------------------------------------------------------
+
+@router.get("/schedules/{doctor_id}", response_model=List[DoctorScheduleRead])
+async def get_doctor_schedules(
+    doctor_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Returns weekly recurring shift schedules for a specific doctor.
+    Accessible to administrators, healthcare staff, and the physician themselves.
+    """
+    stmt = (
+        select(DoctorSchedule)
+        .where(DoctorSchedule.doctor_id == doctor_id)
+        .order_by(DoctorSchedule.day_of_week)
+    )
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@router.post("/schedules", response_model=DoctorScheduleRead, status_code=status.HTTP_201_CREATED)
+async def create_or_update_doctor_schedule(
+    payload: DoctorScheduleCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Configures or updates a doctor's weekly recurring shift schedule.
+    Restricted to administrators or the authenticated physician.
+    """
+    is_admin = current_user.role == UserRole.ADMIN
+    if not is_admin:
+        doc_stmt = select(Doctor.id).where(Doctor.user_id == current_user.id)
+        doc_res = await db.execute(doc_stmt)
+        my_doc_id = doc_res.scalar_one_or_none()
+        if not my_doc_id or my_doc_id != payload.doctor_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Only administrators or the doctor can configure shift schedules.",
+            )
+
+    # Check if a schedule already exists for this doctor and day_of_week
+    stmt = select(DoctorSchedule).where(
+        DoctorSchedule.doctor_id == payload.doctor_id,
+        DoctorSchedule.day_of_week == payload.day_of_week,
+    )
+    res = await db.execute(stmt)
+    sched = res.scalar_one_or_none()
+
+    if sched:
+        sched.start_time = payload.start_time
+        sched.end_time = payload.end_time
+        sched.slot_duration_minutes = payload.slot_duration_minutes
+        sched.is_telehealth_capable = payload.is_telehealth_capable
+        sched.is_in_person_capable = payload.is_in_person_capable
+        sched.clinic_timezone = payload.clinic_timezone
+        sched.is_active = payload.is_active
+    else:
+        sched = DoctorSchedule(
+            id=uuid.uuid4(),
+            doctor_id=payload.doctor_id,
+            day_of_week=payload.day_of_week,
+            start_time=payload.start_time,
+            end_time=payload.end_time,
+            slot_duration_minutes=payload.slot_duration_minutes,
+            is_telehealth_capable=payload.is_telehealth_capable,
+            is_in_person_capable=payload.is_in_person_capable,
+            clinic_timezone=payload.clinic_timezone,
+            is_active=payload.is_active,
+        )
+        db.add(sched)
+
+    await db.commit()
+    await db.refresh(sched)
+    return sched
+
+
+@router.delete("/schedules/{schedule_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_doctor_schedule(
+    schedule_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Deletes or deactivates a shift schedule (Admin only)."""
+    if current_user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization required.")
+
+    stmt = select(DoctorSchedule).where(DoctorSchedule.id == schedule_id)
+    res = await db.execute(stmt)
+    sched = res.scalar_one_or_none()
+    if not sched:
+        raise HTTPException(status_code=404, detail="Schedule not found.")
+
+    await db.delete(sched)
+    await db.commit()
+
+
+@router.get("/time-off/{doctor_id}", response_model=List[DoctorTimeOffRead])
+async def get_doctor_time_off(
+    doctor_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Lists planned time-off and clinic holidays for a doctor."""
+    stmt = (
+        select(DoctorTimeOff)
+        .where(DoctorTimeOff.doctor_id == doctor_id)
+        .order_by(DoctorTimeOff.start_date)
+    )
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@router.post("/time-off", response_model=DoctorTimeOffRead, status_code=status.HTTP_201_CREATED)
+async def create_doctor_time_off(
+    payload: DoctorTimeOffCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Creates an approved time-off or vacation block for a physician."""
+    is_admin = current_user.role == UserRole.ADMIN
+    if not is_admin:
+        doc_stmt = select(Doctor.id).where(Doctor.user_id == current_user.id)
+        doc_res = await db.execute(doc_stmt)
+        my_doc_id = doc_res.scalar_one_or_none()
+        if not my_doc_id or my_doc_id != payload.doctor_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Forbidden: Only administrators or the doctor can register time off.",
+            )
+
+    time_off = DoctorTimeOff(
+        id=uuid.uuid4(),
+        doctor_id=payload.doctor_id,
+        start_date=payload.start_date,
+        end_date=payload.end_date,
+        reason=payload.reason,
+    )
+    db.add(time_off)
+    await db.commit()
+    await db.refresh(time_off)
+    return time_off
+

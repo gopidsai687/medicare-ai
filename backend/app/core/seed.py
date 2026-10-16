@@ -552,13 +552,14 @@ async def seed_initial_data(session: AsyncSession) -> None:
                     "license": "MD-2024-99883",
                     "location": "East Pavilion Clinic 2A",
                     "phone": "(555) 234-1103",
-                    "bio": "Primary care physician dedicated to routine physicals, wellness screening, and multi-morbid care coordination.",
+                    "bio": "Primary care physician dedicated to routine physicals, wellness screening, and multi-morbid care coordination. (Demonstration Clinic Provider)",
                     "shifts": [
                         (DayOfWeek.MONDAY, time(8, 0), time(17, 0), 30),
                         (DayOfWeek.TUESDAY, time(8, 0), time(17, 0), 30),
                         (DayOfWeek.WEDNESDAY, time(8, 0), time(17, 0), 30),
                         (DayOfWeek.THURSDAY, time(8, 0), time(17, 0), 30),
                         (DayOfWeek.FRIDAY, time(8, 0), time(17, 0), 30),
+                        (DayOfWeek.SATURDAY, time(9, 0), time(13, 0), 30),  # Demonstration Outpatient Saturday Clinic
                     ]
                 },
                 {
@@ -569,12 +570,13 @@ async def seed_initial_data(session: AsyncSession) -> None:
                     "license": "MD-2024-99884",
                     "location": "North Tower Suite 505",
                     "phone": "(555) 234-1104",
-                    "bio": "Pulmonologist specializing in asthma, COPD, pulmonary fibrosis, and respiratory care.",
+                    "bio": "Pulmonologist specializing in asthma, COPD, pulmonary fibrosis, and respiratory care. (Demonstration Clinic Provider)",
                     "shifts": [
                         (DayOfWeek.TUESDAY, time(9, 0), time(16, 0), 45),
                         (DayOfWeek.WEDNESDAY, time(9, 0), time(16, 0), 45),
                         (DayOfWeek.THURSDAY, time(9, 0), time(16, 0), 45),
                         (DayOfWeek.FRIDAY, time(9, 0), time(16, 0), 45),
+                        (DayOfWeek.SATURDAY, time(9, 0), time(13, 0), 45), # Demonstration Saturday Respiratory Clinic
                     ]
                 },
                 {
@@ -585,7 +587,7 @@ async def seed_initial_data(session: AsyncSession) -> None:
                     "license": "MD-2024-99885",
                     "location": "West Wing Suite 412",
                     "phone": "(555) 234-1105",
-                    "bio": "Neurologist and stroke specialist focusing on migraine management, peripheral neuropathies, and cognitive health.",
+                    "bio": "Neurologist and stroke specialist focusing on migraine management, peripheral neuropathies, and cognitive health. (Demonstration Clinic Provider)",
                     "shifts": [
                         (DayOfWeek.MONDAY, time(10, 0), time(17, 0), 45),
                         (DayOfWeek.WEDNESDAY, time(10, 0), time(17, 0), 45),
@@ -662,6 +664,12 @@ async def seed_initial_data(session: AsyncSession) -> None:
                             is_active=True,
                         )
                         session.add(s_obj)
+                    else:
+                        s_obj.is_active = True
+                        s_obj.start_time = start_tm
+                        s_obj.end_time = end_tm
+                        s_obj.slot_duration_minutes = duration
+                        s_obj.clinic_timezone = "America/New_York"
 
             await session.flush()
             log.info("Demonstration doctors and recurring weekly schedules successfully verified/seeded.")
