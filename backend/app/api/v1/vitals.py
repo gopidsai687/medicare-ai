@@ -2754,7 +2754,11 @@ async def get_human_body_map(
     res = await db.execute(query)
     all_records = res.scalars().all()
     actual_records = [r for r in all_records if not r.is_sample]
-    records = actual_records if actual_records else all_records
+    # If the latest recorded telemetry is an active test-mode simulation, reflect it in the body map
+    if all_records and all_records[0].is_sample:
+        records = all_records
+    else:
+        records = actual_records if actual_records else all_records
 
     # 2. Fetch active alerts count
     alert_stmt = select(VitalAlert).where(
