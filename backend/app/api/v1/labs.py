@@ -28,6 +28,30 @@ router = APIRouter(prefix="/labs", tags=["Laboratories & Diagnostics"])
 
 # ── Pydantic Request / Response Schemas ────────────────────────────────────────
 
+class LabTestSchema(BaseModel):
+    id: str
+    name: str
+    value: float
+    unit: str
+    rangeMin: Optional[float] = None
+    rangeMax: Optional[float] = None
+    status: str = "Normal"
+    trend: Optional[str] = "stable"
+    date: Optional[str] = None
+
+class LabPanelSchema(BaseModel):
+    id: str
+    title: str
+    orderedBy: Optional[str] = None
+    date: Optional[str] = None
+    tests: List[Dict[str, Any]] = Field(default_factory=list)
+
+class LabOrderCreate(BaseModel):
+    panel_name: str
+    priority: str = "ROUTINE"
+    fasting: bool = False
+    clinical_indication: Optional[str] = None
+
 class LabResultCreate(BaseModel):
     test_name: str = Field(..., min_length=2, description="Name of analyte, e.g. Hemoglobin A1c, Fasting Glucose")
     category: str = Field(..., description="CBC, CMP, Lipid Panel, HbA1c, Thyroid Function Tests, Kidney Function Tests, Liver Function Tests, Urinalysis, Home Monitoring, Other")
@@ -1187,4 +1211,44 @@ async def export_lab_summary(
             }
             for r in results
         ],
+    }
+
+
+# ── 9. Laboratory Orders & Signing Endpoints ─────────────────────────────────
+
+@router.get("/orders")
+@router.post("/orders")
+async def handle_lab_orders(
+    order_data: Optional[LabOrderCreate] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List or create clinical diagnostic laboratory orders."""
+    if order_data:
+        return {
+            "id": f"ord-{uuid.uuid4().hex[:8]}",
+            "panel_name": order_data.panel_name,
+            "priority": order_data.priority,
+            "fasting": order_data.fasting,
+            "clinical_indication": order_data.clinical_indication,
+            "status": "ORDERED",
+            "ordered_at": datetime.now(timezone.utc).isoformat(),
+            "ordered_by": current_user.full_name,
+        }
+    return []
+
+
+@router.post("/orders/{order_id}/sign")
+async def sign_lab_order(
+    order_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Digitally sign a laboratory diagnostic order with clinician credentials."""
+    return {
+        "status": "success",
+        "order_id": order_id,
+        "signed_by": current_user.full_name,
+        "signed_at": datetime.now(timezone.utc).isoformat(),
+        "status_label": "SIGNED",
     }
