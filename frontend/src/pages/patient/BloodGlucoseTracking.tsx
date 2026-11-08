@@ -20,9 +20,12 @@ import {
   Moon,
   Sun,
   Activity,
+  Bluetooth,
+  Radio,
   X,
 } from 'lucide-react'
 import { TestModeConsole } from '@/components/vitals/TestModeConsole'
+import { DeviceConnectModal } from '@/components/vitals/DeviceConnectModal'
 import {
   ResponsiveContainer,
   LineChart,
@@ -59,6 +62,7 @@ export default function BloodGlucoseTracking() {
   const [filterPeriod, setFilterPeriod] = useState<number>(30)
   const [displayUnit, setDisplayUnit] = useState<'mg/dL' | 'mmol/L'>('mg/dL')
   const [showLogModal, setShowLogModal] = useState(false)
+  const [showDeviceModal, setShowDeviceModal] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [alertBanner, setAlertBanner] = useState<{
@@ -348,17 +352,27 @@ export default function BloodGlucoseTracking() {
             </button>
           </div>
 
-          <button
-            onClick={() => {
-              setFormData((prev) => ({ ...prev, unit: displayUnit }))
-              setShowLogModal(true)
-            }}
-            className="btn-primary"
-            style={{ fontSize: '0.85rem' }}
-          >
-            <Plus size={16} />
-            <span>Record Glucose</span>
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <button
+              onClick={() => setShowDeviceModal(true)}
+              className="btn-secondary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              <Bluetooth size={16} />
+              <span>Connect Meter / CGM</span>
+            </button>
+            <button
+              onClick={() => {
+                setFormData((prev) => ({ ...prev, unit: displayUnit }))
+                setShowLogModal(true)
+              }}
+              className="btn-primary"
+              style={{ fontSize: '0.85rem' }}
+            >
+              <Plus size={16} />
+              <span>Record Glucose</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -466,17 +480,57 @@ export default function BloodGlucoseTracking() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
         {/* Latest Reading Card */}
         <div className="stat-card">
-          <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-            Latest Blood Glucose
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Latest Blood Glucose
+            </div>
+            {latest && (
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  background: latest.measurement_source === 'manual' ? 'rgba(148,163,184,0.12)' : 'rgba(20,184,166,0.15)',
+                  color: latest.measurement_source === 'manual' ? '#cbd5e1' : '#2dd4bf',
+                  border: latest.measurement_source === 'manual' ? '1px solid rgba(148,163,184,0.2)' : '1px solid rgba(20,184,166,0.3)',
+                }}
+              >
+                {latest.device_name || (latest.measurement_source === 'manual' ? 'Manual Entry' : 'Device Sync')}
+              </span>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: '2.1rem', fontWeight: 800, color: '#f8fafc' }}>
-              {latestVal != null ? latestVal : '--'}
-            </span>
-            <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 500 }}>{displayUnit}</span>
-          </div>
+
+          {latestVal != null ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+                background: 'rgba(15,23,42,0.65)',
+                padding: '10px 14px',
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }}
+            >
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+                • Glucose: <span style={{ color: '#2dd4bf' }}>{latestVal} {displayUnit}</span>
+              </div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+                • Measurement type: <span style={{ color: '#38bdf8', textTransform: 'capitalize' }}>{latest?.glucose_context ? latest.glucose_context.replace('_', ' ') : 'Fasting'}</span>
+              </div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+                • Date &amp; time: <span style={{ color: '#94a3b8' }}>{format(new Date(latest!.recorded_at), 'MMM d, yyyy h:mm a')}</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#64748b', padding: '12px 0' }}>
+              No reading recorded
+            </div>
+          )}
+
           {latest && (
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
               {(() => {
                 const badge = getGlucoseCategoryBadge(latest.glucose_category)
                 return (
@@ -495,8 +549,8 @@ export default function BloodGlucoseTracking() {
                   </span>
                 )
               })()}
-              <span style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'capitalize' }}>
-                {latest.glucose_context ? latest.glucose_context.replace('_', ' ') : 'Random'}
+              <span style={{ fontSize: '0.72rem', color: '#64748b' }}>
+                Synced to Patient EHR
               </span>
             </div>
           )}
@@ -1144,6 +1198,14 @@ export default function BloodGlucoseTracking() {
           </div>
         </div>
       )}
+
+      {/* Bluetooth Glucose Meter & CGM Device Connect Modal */}
+      <DeviceConnectModal
+        isOpen={showDeviceModal}
+        onClose={() => setShowDeviceModal(false)}
+        onDeviceLinked={fetchReadings}
+        onOpenManualGlucose={() => setShowLogModal(true)}
+      />
     </div>
   )
 }

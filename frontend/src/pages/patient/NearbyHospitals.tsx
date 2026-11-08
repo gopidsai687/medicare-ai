@@ -9,11 +9,12 @@ import {
   Clock,
   ExternalLink,
   Building2,
-  CheckCircle2,
   Compass,
   Info,
   RefreshCw,
   Phone,
+  SlidersHorizontal,
+  ChevronRight,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -23,26 +24,46 @@ interface HospitalFacility {
   facility_type: string
   trauma_level?: string | null
   has_emergency_department: boolean
+  is_emergency_department?: boolean
   address: string
   city: string
   state: string
   postal_code?: string | null
+  zip_code?: string | null
   phone?: string | null
+  emergency_phone?: string | null
   distance_miles?: number | null
   distance_km?: number | null
   opening_hours: string
-  verified_emergency_center: boolean
+  verified_emergency_center?: boolean
+  is_verified?: boolean
   directions_url: string
+  website?: string | null
+  data_source?: string
+}
+
+interface SearchOrigin {
+  latitude: number
+  longitude: number
+  city?: string
+  state?: string
+  postal_code?: string
+  label?: string
+  provider?: string
 }
 
 export default function NearbyHospitals() {
   const [facilities, setFacilities] = useState<HospitalFacility[]>([])
   const [loading, setLoading] = useState(false)
-  const [searchQuery, setSearchQuery] = useState('')
+  const [searchQuery, setSearchQuery] = useState('37067')
+  const [radiusMiles, setRadiusMiles] = useState<number>(25)
+  const [filterEROnly, setFilterEROnly] = useState<boolean>(false)
   const [currentCoords, setCurrentCoords] = useState<{ lat: number; lon: number } | null>(null)
   const [locationStatus, setLocationStatus] = useState<'idle' | 'requesting' | 'granted' | 'denied'>('idle')
   const [locationError, setLocationError] = useState<string | null>(null)
-  const [filterEROnly, setFilterEROnly] = useState(false)
+  const [lastSearchedLocation, setLastSearchedLocation] = useState<string | null>(null)
+  const [resolvedOrigin, setResolvedOrigin] = useState<SearchOrigin | null>(null)
+  const [hasSearched, setHasSearched] = useState<boolean>(false)
 
   // Request HTML5 Geolocation
   const requestLocation = () => {
@@ -51,8 +72,7 @@ export default function NearbyHospitals() {
 
     if (!navigator.geolocation) {
       setLocationStatus('denied')
-      setLocationError('Geolocation is not supported by your browser. Please search by city or ZIP code below.')
-      searchByQuery('Houston, TX')
+      setLocationError('Geolocation is not supported by your browser. Please enter your ZIP code or city below.')
       return
     }
 
@@ -61,65 +81,107 @@ export default function NearbyHospitals() {
         const { latitude, longitude } = position.coords
         setCurrentCoords({ lat: latitude, lon: longitude })
         setLocationStatus('granted')
-        fetchNearbyByCoords(latitude, longitude)
+        fetchNearbyByCoords(latitude, longitude, radiusMiles, filterEROnly)
       },
       (error) => {
         setLocationStatus('denied')
-        let msg = 'Location access was declined or timed out. Please enter your city or ZIP code below.'
+        let msg = 'Location access was declined or timed out. Please enter your ZIP code or city below.'
         if (error.code === error.PERMISSION_DENIED) {
-          msg = 'Location permission was denied. You can manually enter any city or ZIP code.'
+          msg = 'Location permission was denied. You can manually enter your 5-digit ZIP code or city.'
         }
         setLocationError(msg)
-        // Fallback default search to show verified trauma centers
-        searchByQuery('Chicago, IL')
       },
       { timeout: 10000, enableHighAccuracy: true }
     )
   }
 
-  const fetchNearbyByCoords = async (lat: number, lon: number) => {
-    try {
-      setLoading(true)
-      const res = await api.get('/api/v1/vitals/emergency/hospitals', {
-        params: { lat, lon, radius_km: 30 },
-      })
-      setFacilities(res.data?.facilities || [])
-    } catch (err) {
-      console.error('Failed to query hospitals by location:', err)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const searchByQuery = async (queryText: string) => {
-    if (!queryText.trim()) return
+  const fetchNearbyByCoords = async (lat: number, lon: number, radius: number, erOnly: boolean) => {
     try {
       setLoading(true)
       setLocationError(null)
       const res = await api.get('/api/v1/vitals/emergency/hospitals', {
-        params: { query: queryText.trim(), radius_km: 30 },
+        params: {
+          latitude: lat,
+          longitude: lon,
+          radius_miles: radius,
+          emergency_only: erOnly,
+        },
       })
-      setFacilities(res.data?.facilities || [])
-    } catch (err) {
-      console.error('Failed to query hospitals by text search:', err)
+      const found = res.data?.facilities || []
+      setFacilities(found)
+      setResolvedOrigin(res.data?.origin || null)
+      setLastSearchedLocation(res.data?.origin?.label || `${lat.toFixed(4)}, ${lon.toFixed(4)}`)
+      setHasSearched(true)
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || 'Unable to retrieve nearby hospitals. Please try again.'
+      setLocationError(errorMsg)
+      setFacilities([])
+      setHasSearched(true)
     } finally {
       setLoading(false)
     }
   }
 
+  const searchByQuery = async (queryText: string, radius: number = radiusMiles, erOnly: boolean = filterEROnly) => {
+    const clean = queryText.trim()
+    if (!clean) {
+      setLocationError('Please enter a valid 5-digit US ZIP code or city (e.g. 37067 or Franklin, TN).')
+      return
+    }
+
+    try {
+      setLoading(true)
+      setLocationError(null)
+      const res = await api.get('/api/v1/vitals/emergency/hospitals', {
+        params: {
+          query: clean,
+          radius_miles: radius,
+          emergency_only: erOnly,
+        },
+      })
+
+      const found = res.data?.facilities || []
+      setFacilities(found)
+      setResolvedOrigin(res.data?.origin || null)
+      setLastSearchedLocation(res.data?.origin?.label || clean)
+      setHasSearched(true)
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || 'Unable to retrieve nearby hospitals. Please try again.'
+      setLocationError(errorMsg)
+      setFacilities([])
+      setHasSearched(true)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Load Franklin, TN (37067) on initial mount
   useEffect(() => {
-    // Initial fetch using default search so user isn't stuck with empty screen
-    searchByQuery('Chicago, IL')
+    searchByQuery('37067', 25, false)
   }, [])
 
   const handleManualSearch = (e: React.FormEvent) => {
     e.preventDefault()
-    searchByQuery(searchQuery)
+    searchByQuery(searchQuery, radiusMiles, filterEROnly)
   }
 
-  const filteredFacilities = facilities.filter(
-    (f) => !filterEROnly || f.has_emergency_department
-  )
+  const handleRadiusChange = (newRadius: number) => {
+    setRadiusMiles(newRadius)
+    if (currentCoords && locationStatus === 'granted') {
+      fetchNearbyByCoords(currentCoords.lat, currentCoords.lon, newRadius, filterEROnly)
+    } else if (searchQuery.trim()) {
+      searchByQuery(searchQuery, newRadius, filterEROnly)
+    }
+  }
+
+  const handleERFilterToggle = (checked: boolean) => {
+    setFilterEROnly(checked)
+    if (currentCoords && locationStatus === 'granted') {
+      fetchNearbyByCoords(currentCoords.lat, currentCoords.lon, radiusMiles, checked)
+    } else if (searchQuery.trim()) {
+      searchByQuery(searchQuery, radiusMiles, checked)
+    }
+  }
 
   return (
     <div style={{ maxWidth: 1100, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -182,12 +244,12 @@ export default function NearbyHospitals() {
           <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '3px 10px', borderRadius: 20, background: 'rgba(14,165,233,0.1)', border: '1px solid rgba(14,165,233,0.2)', marginBottom: 6 }}>
             <MapPin size={12} color="#38bdf8" />
             <span style={{ fontSize: '0.72rem', fontWeight: 600, color: '#38bdf8', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
-              Healthcare Discovery
+              Accurate Location Discovery
             </span>
           </div>
           <h2 className="page-title">Nearby Hospitals & Emergency Departments</h2>
           <p className="page-subtitle">
-            Find verified trauma centers, hospital emergency rooms, and get turn-by-turn driving directions.
+            Find verified trauma centers and 24/7 hospital emergency rooms using accurate geocoding and real distance calculations.
           </p>
         </div>
 
@@ -209,94 +271,188 @@ export default function NearbyHospitals() {
         </div>
       </div>
 
-      {/* Location Status Alert / Error */}
+      {/* Search Bar, Radius Selector & Filter Options */}
+      <div
+        className="glass"
+        style={{
+          padding: '18px 22px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 14,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
+          {/* Text/ZIP Search Form */}
+          <form onSubmit={handleManualSearch} style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 280 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                background: 'rgba(10,22,40,0.8)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 10,
+                padding: '8px 14px',
+                flex: 1,
+              }}
+            >
+              <Search size={16} color="#64748b" />
+              <input
+                type="text"
+                placeholder="Enter 5-digit ZIP code or City, State (e.g., 37067 or Franklin, TN)…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  outline: 'none',
+                  color: '#f8fafc',
+                  fontSize: '0.875rem',
+                  width: '100%',
+                }}
+              />
+            </div>
+            <button type="submit" disabled={loading} className="btn-secondary" style={{ padding: '8px 20px', fontWeight: 600 }}>
+              {loading ? <RefreshCw size={14} className="animate-spin" /> : <span>Search</span>}
+            </button>
+          </form>
+
+          {/* Radius Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <SlidersHorizontal size={14} color="#94a3b8" />
+            <span style={{ fontSize: '0.8rem', color: '#94a3b8' }}>Radius:</span>
+            <select
+              value={radiusMiles}
+              onChange={(e) => handleRadiusChange(Number(e.target.value))}
+              style={{
+                background: 'rgba(10,22,40,0.85)',
+                border: '1px solid rgba(255,255,255,0.12)',
+                borderRadius: 8,
+                padding: '6px 12px',
+                color: '#f8fafc',
+                fontSize: '0.8rem',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+            >
+              <option value={5}>5 miles</option>
+              <option value={10}>10 miles</option>
+              <option value={25}>25 miles (Default)</option>
+              <option value={50}>50 miles</option>
+              <option value={100}>100 miles</option>
+            </select>
+          </div>
+
+          {/* 24/7 Emergency Department Filter */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: '#cbd5e1', cursor: 'pointer' }}>
+              <input
+                type="checkbox"
+                checked={filterEROnly}
+                onChange={(e) => handleERFilterToggle(e.target.checked)}
+                style={{ accentColor: '#38bdf8', width: 16, height: 16 }}
+              />
+              <span style={{ fontWeight: 500 }}>24/7 Emergency Departments Only</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Quick Search Test Location Chips */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
+          <span style={{ fontSize: '0.72rem', color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.04em' }}>Quick Test Locations:</span>
+          {[
+            { label: 'Franklin, TN (37067)', val: '37067' },
+            { label: 'Brentwood, TN (37027)', val: '37027' },
+            { label: 'Chicago, IL (60611)', val: '60611' },
+            { label: 'New York, NY (10001)', val: '10001' },
+          ].map((chip) => (
+            <button
+              key={chip.val}
+              type="button"
+              onClick={() => {
+                setSearchQuery(chip.val)
+                searchByQuery(chip.val, radiusMiles, filterEROnly)
+              }}
+              style={{
+                background: searchQuery === chip.val ? 'rgba(56,189,248,0.2)' : 'rgba(255,255,255,0.04)',
+                border: searchQuery === chip.val ? '1px solid rgba(56,189,248,0.4)' : '1px solid rgba(255,255,255,0.08)',
+                color: searchQuery === chip.val ? '#38bdf8' : '#cbd5e1',
+                padding: '3px 10px',
+                borderRadius: 14,
+                fontSize: '0.74rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              {chip.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Location Status / Error Alert */}
       {locationError && (
         <div
           style={{
-            background: 'rgba(245,158,11,0.12)',
-            border: '1px solid rgba(245,158,11,0.3)',
+            background: 'rgba(239,68,68,0.12)',
+            border: '1px solid rgba(239,68,68,0.3)',
             borderRadius: 10,
-            padding: '12px 16px',
+            padding: '14px 18px',
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
-            color: '#fef3c7',
-            fontSize: '0.825rem',
+            gap: 12,
+            color: '#fecaca',
+            fontSize: '0.85rem',
           }}
         >
-          <Info size={16} color="#fbbf24" style={{ flexShrink: 0 }} />
+          <AlertTriangle size={18} color="#f87171" style={{ flexShrink: 0 }} />
           <span>{locationError}</span>
         </div>
       )}
 
-      {/* Search Bar & Filter Options */}
-      <div
-        className="glass"
-        style={{
-          padding: '16px 20px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          flexWrap: 'wrap',
-          gap: 14,
-        }}
-      >
-        <form onSubmit={handleManualSearch} style={{ display: 'flex', alignItems: 'center', gap: 10, flex: 1, minWidth: 260 }}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              background: 'rgba(10,22,40,0.8)',
-              border: '1px solid rgba(255,255,255,0.1)',
-              borderRadius: 10,
-              padding: '8px 14px',
-              flex: 1,
-            }}
-          >
-            <Search size={16} color="#64748b" />
-            <input
-              type="text"
-              placeholder="Search by City, State, or ZIP code (e.g., Houston, TX or 77030)…"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              style={{
-                background: 'none',
-                border: 'none',
-                outline: 'none',
-                color: '#f8fafc',
-                fontSize: '0.85rem',
-                width: '100%',
-              }}
-            />
+      {/* Active Location & Distance Context Indicator */}
+      {lastSearchedLocation && !loading && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            padding: '8px 16px',
+            background: 'rgba(15,23,42,0.6)',
+            borderRadius: 10,
+            border: '1px solid rgba(255,255,255,0.06)',
+            fontSize: '0.8rem',
+            color: '#94a3b8',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <MapPin size={14} color="#38bdf8" />
+            <span>
+              Showing results for: <strong style={{ color: '#f8fafc' }}>{lastSearchedLocation}</strong>
+              {resolvedOrigin?.latitude && resolvedOrigin?.longitude && (
+                <span style={{ color: '#64748b', marginLeft: 6 }}>
+                  ({resolvedOrigin.latitude.toFixed(4)}° N, {resolvedOrigin.longitude.toFixed(4)}° W)
+                </span>
+              )}
+            </span>
           </div>
-          <button type="submit" disabled={loading} className="btn-secondary" style={{ padding: '8px 16px' }}>
-            <span>Search</span>
-          </button>
-        </form>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: '#cbd5e1', cursor: 'pointer' }}>
-            <input
-              type="checkbox"
-              checked={filterEROnly}
-              onChange={(e) => setFilterEROnly(e.target.checked)}
-              style={{ accentColor: '#38bdf8' }}
-            />
-            <span>24/7 Emergency Departments Only</span>
-          </label>
+          <div>
+            Search Radius: <strong style={{ color: '#38bdf8' }}>{radiusMiles} miles</strong> • Found: <strong style={{ color: '#10b981' }}>{facilities.length}</strong> facilities
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Hospital Facilities Grid */}
       {loading ? (
         <div style={{ padding: '60px 20px', textAlign: 'center', color: '#94a3b8' }}>
-          <RefreshCw size={24} className="animate-spin mx-auto mb-3" color="#38bdf8" />
-          <div>Querying healthcare facilities and verified trauma centers...</div>
+          <RefreshCw size={28} className="animate-spin mx-auto mb-3" color="#38bdf8" />
+          <div style={{ fontSize: '0.95rem', color: '#cbd5e1', fontWeight: 600 }}>Querying regional medical centers and verified emergency departments…</div>
+          <div style={{ fontSize: '0.8rem', color: '#64748b', marginTop: 6 }}>Resolving geographic coordinates and computing exact Haversine distances</div>
         </div>
-      ) : filteredFacilities.length > 0 ? (
+      ) : facilities.length > 0 ? (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: 18 }}>
-          {filteredFacilities.map((hospital) => (
+          {facilities.map((hospital) => (
             <div
               key={hospital.id}
               className="glass"
@@ -305,7 +461,8 @@ export default function NearbyHospitals() {
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                border: hospital.trauma_level ? '1px solid rgba(56,189,248,0.25)' : '1px solid rgba(255,255,255,0.06)',
+                border: hospital.has_emergency_department ? '1px solid rgba(56,189,248,0.25)' : '1px solid rgba(255,255,255,0.06)',
+                boxShadow: hospital.has_emergency_department ? '0 4px 20px rgba(14,165,233,0.08)' : 'none',
                 transition: 'transform 0.2s ease, border-color 0.2s ease',
               }}
             >
@@ -352,9 +509,12 @@ export default function NearbyHospitals() {
                     <span
                       style={{
                         marginLeft: 'auto',
-                        fontSize: '0.75rem',
+                        fontSize: '0.78rem',
                         color: '#38bdf8',
                         fontWeight: 700,
+                        background: 'rgba(14,165,233,0.1)',
+                        padding: '2px 8px',
+                        borderRadius: 6,
                       }}
                     >
                       {hospital.distance_miles.toFixed(1)} miles away
@@ -371,20 +531,27 @@ export default function NearbyHospitals() {
                 <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, color: '#94a3b8', fontSize: '0.8rem', marginBottom: 12 }}>
                   <MapPin size={15} color="#64748b" style={{ flexShrink: 0, marginTop: 2 }} />
                   <div>
-                    {hospital.address}, {hospital.city}, {hospital.state} {hospital.postal_code || ''}
+                    {hospital.address}, {hospital.city}, {hospital.state} {hospital.postal_code || hospital.zip_code || ''}
                   </div>
                 </div>
 
                 {/* Opening Hours Status */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#10b981', fontSize: '0.75rem', fontWeight: 500, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#10b981', fontSize: '0.75rem', fontWeight: 500, marginBottom: 12 }}>
                   <Clock size={13} />
                   <span>{hospital.opening_hours}</span>
                 </div>
+
+                {/* Data Source Badge */}
+                {hospital.data_source && (
+                  <div style={{ fontSize: '0.7rem', color: '#64748b', marginBottom: 14 }}>
+                    Source: <span style={{ color: '#94a3b8' }}>{hospital.data_source}</span>
+                  </div>
+                )}
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons: Genuine Call Desk & Google Maps Directions */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 14, borderTop: '1px solid rgba(255,255,255,0.06)' }}>
-                {hospital.phone && (
+                {hospital.phone ? (
                   <a
                     href={`tel:${hospital.phone.replace(/[^0-9+]/g, '')}`}
                     className="btn-secondary"
@@ -392,6 +559,15 @@ export default function NearbyHospitals() {
                   >
                     <Phone size={13} />
                     <span>Call Desk</span>
+                  </a>
+                ) : (
+                  <a
+                    href="tel:911"
+                    className="btn-secondary"
+                    style={{ flex: 1, padding: '8px 12px', fontSize: '0.78rem', textDecoration: 'none', justifyContent: 'center' }}
+                  >
+                    <Phone size={13} />
+                    <span>Call 911</span>
                   </a>
                 )}
 
@@ -410,18 +586,33 @@ export default function NearbyHospitals() {
             </div>
           ))}
         </div>
-      ) : (
+      ) : hasSearched ? (
         <div className="glass" style={{ padding: '60px 20px', textAlign: 'center', color: '#94a3b8' }}>
           <Building2 size={36} color="#64748b" className="mx-auto mb-3" />
-          <h3 style={{ color: '#cbd5e1', margin: '0 0 6px' }}>No healthcare facilities found</h3>
-          <p style={{ fontSize: '0.85rem', color: '#64748b', maxWidth: 400, margin: '0 auto 16px' }}>
-            Try expanding your search query (e.g. search for "Chicago, IL" or "Houston, TX") or click "Use My Current Location".
+          <h3 style={{ color: '#cbd5e1', margin: '0 0 6px' }}>No healthcare facilities found within {radiusMiles} miles</h3>
+          <p style={{ fontSize: '0.85rem', color: '#64748b', maxWidth: 440, margin: '0 auto 18px' }}>
+            There are no verified hospitals matching your criteria in this search radius. Try expanding the search radius or disabling the 24/7 ER filter.
           </p>
-          <button onClick={() => searchByQuery('Chicago, IL')} className="btn-secondary" style={{ fontSize: '0.8rem' }}>
-            Search Major Medical Centers
-          </button>
+          <div style={{ display: 'flex', justifyContent: 'center', gap: 10 }}>
+            <button
+              onClick={() => handleRadiusChange(50)}
+              className="btn-secondary"
+              style={{ fontSize: '0.82rem' }}
+            >
+              Expand Radius to 50 miles
+            </button>
+            {filterEROnly && (
+              <button
+                onClick={() => handleERFilterToggle(false)}
+                className="btn-secondary"
+                style={{ fontSize: '0.82rem' }}
+              >
+                Include All Healthcare Facilities
+              </button>
+            )}
+          </div>
         </div>
-      )}
+      ) : null}
 
       {/* Safety & Compliance Information */}
       <div

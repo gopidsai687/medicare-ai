@@ -164,7 +164,7 @@ async def seed_initial_data(session: AsyncSession) -> None:
                 mrn="MRN-10002",
                 date_of_birth=date(1985, 9, 23),
                 gender=Gender.MALE,
-                blood_type=BloodType.A_POS,
+                blood_type=BloodType.B_POS,
                 phone="(555) 345-6789",
                 address_line1="123 Oak Avenue",
                 city="Springfield",
@@ -177,6 +177,9 @@ async def seed_initial_data(session: AsyncSession) -> None:
                 notes="Hypertension stage 1 under observation.",
             )
             session.add(bob_profile)
+            await session.flush()
+        else:
+            bob_profile.blood_type = BloodType.B_POS
             await session.flush()
             log.info("Seeded patient profile for Bob Smith")
 
@@ -236,11 +239,14 @@ async def seed_initial_data(session: AsyncSession) -> None:
                 await session.flush()
                 log.info("Seeded active clinical prescriptions for Alice Johnson")
 
-            # 6. Medical Records for Alice Johnson
-            res_med = await session.execute(
-                select(MedicalRecord).where(MedicalRecord.patient_id == pat_profile.id)
-            )
-            if not res_med.scalars().first():
+            # 6. Medical Records for Alice Johnson (Diagnoses, Allergies, and Care Plans)
+            existing_diags = (await session.execute(
+                select(MedicalRecord).where(
+                    MedicalRecord.patient_id == pat_profile.id,
+                    MedicalRecord.category == RecordCategory.DIAGNOSIS,
+                )
+            )).scalars().all()
+            if not any(d.icd10_code == "I10" or "hypertension" in d.title.lower() for d in existing_diags):
                 rec1 = MedicalRecord(
                     id=uuid.uuid4(),
                     patient_id=pat_profile.id,
@@ -252,6 +258,31 @@ async def seed_initial_data(session: AsyncSession) -> None:
                     record_date=date(2026, 1, 15),
                     status=RecordStatus.ACTIVE,
                 )
+                session.add(rec1)
+                log.info("Seeded confirmed diagnosis record for Alice Johnson (Hypertension)")
+
+            if not any(d.icd10_code == "E11.9" or "diabetes" in d.title.lower() for d in existing_diags):
+                rec_dm = MedicalRecord(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    category=RecordCategory.DIAGNOSIS,
+                    title="Type 2 Diabetes Mellitus",
+                    description="Managed with Metformin 500mg oral twice daily and lifestyle modifications.",
+                    icd10_code="E11.9",
+                    record_date=date(2026, 2, 1),
+                    status=RecordStatus.ACTIVE,
+                )
+                session.add(rec_dm)
+                log.info("Seeded confirmed diagnosis record for Alice Johnson (Type 2 Diabetes)")
+
+            existing_allergy = (await session.execute(
+                select(MedicalRecord).where(
+                    MedicalRecord.patient_id == pat_profile.id,
+                    MedicalRecord.category == RecordCategory.ALLERGY,
+                )
+            )).scalars().first()
+            if not existing_allergy:
                 rec2 = MedicalRecord(
                     id=uuid.uuid4(),
                     patient_id=pat_profile.id,
@@ -261,10 +292,82 @@ async def seed_initial_data(session: AsyncSession) -> None:
                     description="Severe urticaria and angioedema reported upon pediatric exposure.",
                     record_date=date(2020, 5, 10),
                     status=RecordStatus.ACTIVE,
+                    severity="Severe",
                 )
-                session.add_all([rec1, rec2])
-                await session.flush()
-                log.info("Seeded baseline medical records for Alice Johnson")
+                session.add(rec2)
+                log.info("Seeded allergy record for Alice Johnson")
+
+            # Synthetic Laboratory Reports for Alice Johnson
+            existing_labs = (await session.execute(
+                select(MedicalRecord).where(
+                    MedicalRecord.patient_id == pat_profile.id,
+                    MedicalRecord.category == RecordCategory.LAB_RESULT,
+                )
+            )).scalars().all()
+            if not existing_labs:
+                rec_hba1c = MedicalRecord(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    category=RecordCategory.LAB_RESULT,
+                    title="Glycated Hemoglobin (HbA1c) Panel",
+                    description="Hemoglobin A1c: 6.8% (Laboratory Reference Range: 4.0% – 5.6%, Status: Elevated). Estimated Average Glucose (eAG): 148 mg/dL (Reference Range: 70 – 114 mg/dL, Status: Elevated). Ordered by: Dr. James Kim. [Synthetic Demonstration EHR Data]",
+                    record_date=date(2026, 8, 10),
+                    status=RecordStatus.ACTIVE,
+                    severity="Elevated",
+                    metadata_json={
+                        "test_name": "Hemoglobin A1c",
+                        "value": 6.8,
+                        "unit": "%",
+                        "reference_range": "4.0% – 5.6%",
+                        "ordering_physician": "Dr. James Kim, MD",
+                        "is_demo": True,
+                    },
+                )
+                rec_lipid = MedicalRecord(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    category=RecordCategory.LAB_RESULT,
+                    title="Fasting Lipid Panel",
+                    description="Total Cholesterol: 188 mg/dL (Range: 125–200 mg/dL, Normal). LDL-C: 108 mg/dL (Range: <100 mg/dL, Mildly Elevated). HDL-C: 52 mg/dL (Range: >40 mg/dL, Optimal). Triglycerides: 142 mg/dL (Range: <150 mg/dL, Normal). Ordered by: Dr. Sarah Chen. [Synthetic Demonstration EHR Data]",
+                    record_date=date(2026, 9, 18),
+                    status=RecordStatus.ACTIVE,
+                    severity="Mildly Elevated",
+                    metadata_json={
+                        "test_name": "Lipid Panel",
+                        "total_cholesterol": 188,
+                        "ldl": 108,
+                        "hdl": 52,
+                        "triglycerides": 142,
+                        "ordering_physician": "Dr. Sarah Chen, MD",
+                        "is_demo": True,
+                    },
+                )
+                rec_cmp = MedicalRecord(
+                    id=uuid.uuid4(),
+                    patient_id=pat_profile.id,
+                    doctor_id=doc_profile.id,
+                    category=RecordCategory.LAB_RESULT,
+                    title="Comprehensive Metabolic Panel (CMP)",
+                    description="Fasting Blood Glucose: 104 mg/dL (Range: 70–99 mg/dL, Mildly Elevated). BUN: 16 mg/dL (Range: 7–20 mg/dL, Normal). Serum Creatinine: 0.95 mg/dL (Range: 0.6–1.2 mg/dL, Normal). eGFR: 92 mL/min/1.73m² (Normal). Serum Potassium: 4.2 mEq/L (Range: 3.5–5.0 mEq/L, Normal). Serum Sodium: 140 mEq/L (Range: 135–145 mEq/L, Normal). Ordered by: Dr. Sarah Chen. [Synthetic Demonstration EHR Data]",
+                    record_date=date(2026, 9, 18),
+                    status=RecordStatus.ACTIVE,
+                    severity="Normal",
+                    metadata_json={
+                        "test_name": "Comprehensive Metabolic Panel",
+                        "glucose": 104,
+                        "creatinine": 0.95,
+                        "bun": 16,
+                        "potassium": 4.2,
+                        "ordering_physician": "Dr. Sarah Chen, MD",
+                        "is_demo": True,
+                    },
+                )
+                session.add_all([rec_hba1c, rec_lipid, rec_cmp])
+                log.info("Seeded demonstration laboratory records for Alice Johnson")
+
+            await session.flush()
 
             # 7. VitalSense Telemetry for Alice Johnson
             res_vitals = await session.execute(
@@ -675,6 +778,13 @@ async def seed_initial_data(session: AsyncSession) -> None:
             log.info("Demonstration doctors and recurring weekly schedules successfully verified/seeded.")
         except Exception as sched_err:
             log.warning("Skipping schedule seeding (table might not exist yet)", error=str(sched_err))
+
+        # 4. Seed all 28 Medical Departments, Comprehensive Doctor Profiles, and Reviews
+        try:
+            from app.core.seed_departments_and_doctors import seed_departments_and_doctors
+            await seed_departments_and_doctors(session)
+        except Exception as dept_doc_err:
+            log.warning("Department & Doctor directory seeding warning", error=str(dept_doc_err))
 
         await session.commit()
         log.info("Baseline clinical accounts verification/seeding completed successfully.")

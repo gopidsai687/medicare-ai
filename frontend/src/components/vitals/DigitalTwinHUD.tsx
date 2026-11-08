@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import {
   Activity,
   Heart,
@@ -10,22 +10,59 @@ import {
   Dna,
   Eye,
   CheckCircle2,
+  AlertTriangle,
   Sparkles,
+  Clock,
+  FileText,
 } from 'lucide-react'
+import { api } from '@/lib/api'
 
 interface DigitalTwinHUDProps {
   patientName?: string
   patientId?: string
 }
 
-export function DigitalTwinHUD({ patientName = 'Alice Johnson', patientId = '8842-M' }: DigitalTwinHUDProps) {
+export function DigitalTwinHUD({ patientName: defaultName = 'Alice Johnson', patientId: defaultId = '8842-M' }: DigitalTwinHUDProps) {
   const [activeTab, setActiveTab] = useState<'overview' | 'anatomy' | 'neurology' | 'genomics' | 'imaging'>('overview')
+  const [hudData, setHudData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
   const [layers, setLayers] = useState({
     surface: true,
     skeleton: true,
     organs: true,
     landmarks: true,
   })
+
+  useEffect(() => {
+    async function loadHudData() {
+      try {
+        setLoading(true)
+        const res = await api.get('/api/v1/patients/dashboard')
+        setHudData(res.data)
+      } catch (err) {
+        console.warn('Diagnostics HUD fallback to defaults:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    loadHudData()
+  }, [])
+
+  const patientName = hudData?.patient_name || defaultName
+  const patientId = hudData?.mrn || defaultId
+  const hr = hudData?.vitals?.heart_rate?.has_data ? hudData.vitals.heart_rate.value : '--'
+  const bp = hudData?.vitals?.blood_pressure?.has_data ? hudData.vitals.blood_pressure.value : '--'
+  const glu = hudData?.vitals?.blood_glucose?.has_data ? hudData.vitals.blood_glucose.value : '--'
+  const bmi = hudData?.vitals?.bmi?.has_data ? hudData.vitals.bmi.value : '--'
+
+  const missingList: string[] = hudData?.diagnostics_hud?.missing_measurements || []
+  const outdatedList: string[] = hudData?.diagnostics_hud?.outdated_measurements || []
+  const abnormalList: any[] = hudData?.diagnostics_hud?.abnormal_values || []
+  const provenance = hudData?.diagnostics_hud?.provenance || {
+    device_verified_count: 0,
+    manual_entry_count: 0,
+    total_active_telemetry: 0,
+  }
 
   const toggleLayer = (layer: keyof typeof layers) => {
     setLayers((prev) => ({ ...prev, [layer]: !prev[layer] }))
@@ -124,24 +161,63 @@ export function DigitalTwinHUD({ patientName = 'Alice Johnson', patientId = '884
               <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-500/20">
                 <span className="text-[9px] text-slate-400 block">HEART RATE</span>
                 <span className="text-lg font-bold text-emerald-400 flex items-center justify-center gap-1 font-sans">
-                  <Heart size={14} className="text-rose-400 animate-pulse" /> 72
+                  <Heart size={14} className="text-rose-400 animate-pulse" /> {hr}
                 </span>
                 <span className="text-[9px] text-cyan-400">BPM</span>
               </div>
               <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-500/20">
-                <span className="text-[9px] text-slate-400 block">OXYGENATION</span>
-                <span className="text-lg font-bold text-cyan-300 font-sans">98%</span>
-                <span className="text-[9px] text-cyan-400">SpO2</span>
+                <span className="text-[9px] text-slate-400 block">BLOOD PRESSURE</span>
+                <span className="text-lg font-bold text-cyan-300 font-sans">{bp}</span>
+                <span className="text-[9px] text-cyan-400">mmHg</span>
               </div>
               <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-500/20">
-                <span className="text-[9px] text-slate-400 block">RESPIRATION</span>
-                <span className="text-lg font-bold text-cyan-300 font-sans">16</span>
-                <span className="text-[9px] text-cyan-400">/MIN</span>
+                <span className="text-[9px] text-slate-400 block">GLUCOSE</span>
+                <span className="text-lg font-bold text-cyan-300 font-sans">{glu}</span>
+                <span className="text-[9px] text-cyan-400">mg/dL</span>
               </div>
               <div className="p-2 rounded-lg bg-cyan-950/30 border border-cyan-500/20">
-                <span className="text-[9px] text-slate-400 block">CORE TEMP</span>
-                <span className="text-lg font-bold text-cyan-300 font-sans">36.7</span>
-                <span className="text-[9px] text-cyan-400">°C</span>
+                <span className="text-[9px] text-slate-400 block">BODY MASS</span>
+                <span className="text-lg font-bold text-cyan-300 font-sans">{bmi}</span>
+                <span className="text-[9px] text-cyan-400">BMI</span>
+              </div>
+            </div>
+
+            {/* Diagnostics Quality Telemetry */}
+            <div className="pt-2 border-t border-cyan-500/20 space-y-2 text-[10px]">
+              {abnormalList.length > 0 ? (
+                <div className="space-y-1">
+                  <span className="text-amber-400 font-bold block text-[9px] flex items-center gap-1">
+                    <AlertTriangle size={10} /> CLINICAL ALERTS ({abnormalList.length})
+                  </span>
+                  {abnormalList.map((a: any, i: number) => (
+                    <div key={i} className="flex items-center justify-between px-2 py-1 rounded bg-amber-500/10 border border-amber-500/20 text-[9px] text-amber-300 font-mono">
+                      <span>{a.label}: {a.value} {a.unit}</span>
+                      <span className="font-bold uppercase">{a.status}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="flex items-center gap-1.5 text-emerald-400 text-[9px]">
+                  <CheckCircle2 size={11} /> All recorded parameters in target range
+                </div>
+              )}
+
+              {missingList.length > 0 && (
+                <div className="space-y-1 pt-1 border-t border-cyan-500/10">
+                  <span className="text-slate-400 text-[8px] block">MISSING TELEMETRY:</span>
+                  <div className="flex flex-wrap gap-1">
+                    {missingList.map((m: string, i: number) => (
+                      <span key={i} className="px-1.5 py-0.5 rounded bg-slate-900 text-slate-400 border border-slate-800 text-[8px]">
+                        {m}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-1.5 border-t border-cyan-500/10 flex items-center justify-between text-[8px] text-slate-400 font-mono">
+                <span>VERIFIED DEVICES: {provenance.device_verified_count}</span>
+                <span>MANUAL: {provenance.manual_entry_count}</span>
               </div>
             </div>
 

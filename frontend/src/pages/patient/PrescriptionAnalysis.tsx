@@ -31,10 +31,21 @@ import {
   Loader2,
   XCircle,
   HelpCircle,
+  Download,
+  RotateCcw,
+  ShieldCheck,
+  Check,
+  Layers,
+  AlertCircle,
 } from 'lucide-react'
 import api from '@/lib/api'
 import { useAuth } from '@/lib/auth'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
+import { AddPrescriptionModal, PrescriptionItem } from '@/components/prescriptions/AddPrescriptionModal'
+import { EditPrescriptionModal } from '@/components/prescriptions/EditPrescriptionModal'
+import { ArchivePrescriptionModal } from '@/components/prescriptions/ArchivePrescriptionModal'
+import { PrescriptionHistoryModal } from '@/components/prescriptions/PrescriptionHistoryModal'
+import { ClearPrescriptionHistoryModal } from '@/components/prescriptions/ClearPrescriptionHistoryModal'
 
 /* ═══════════════════════════════════════════════════════════════════════════
    TYPES
@@ -136,7 +147,71 @@ export default function PrescriptionAnalysis() {
   const [chatMessages, setChatMessages] = useState<Array<{role: string; content: string; is_emergency?: boolean}>>([])
   const [isChatting, setIsChatting] = useState(false)
 
+  // Prescriptions Management & Modals
+  const [prescriptions, setPrescriptions] = useState<PrescriptionItem[]>([])
+  const [selectedPrescription, setSelectedPrescription] = useState<PrescriptionItem | null>(null)
+  const [dashboardMetrics, setDashboardMetrics] = useState<any>(null)
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isArchiveModalOpen, setIsArchiveModalOpen] = useState(false)
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // ── Load Prescriptions & Dashboard Metrics ──────────────────────────────
+  const loadPrescriptions = useCallback(async () => {
+    try {
+      const [rxRes, dashRes] = await Promise.allSettled([
+        api.get('/api/v1/prescriptions'),
+        api.get('/api/v1/prescriptions/dashboard'),
+      ])
+      if (rxRes.status === 'fulfilled' && Array.isArray(rxRes.value.data)) {
+        setPrescriptions(rxRes.value.data)
+        if (!selectedPrescription && rxRes.value.data.length > 0) {
+          setSelectedPrescription(rxRes.value.data[0])
+        }
+      }
+      if (dashRes.status === 'fulfilled') {
+        setDashboardMetrics(dashRes.value.data)
+      }
+    } catch {
+      // fallback
+    }
+  }, [selectedPrescription])
+
+  useEffect(() => {
+    loadPrescriptions()
+  }, [loadPrescriptions])
+
+  const handleDownloadReport = async () => {
+    setIsExporting(true)
+    try {
+      if (report) {
+        const blob = new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `Prescription_Analysis_${report.id.slice(0, 8)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+      } else {
+        const res = await api.get('/api/v1/prescriptions/export')
+        const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `MediCare_Prescriptions_Summary_${new Date().toISOString().slice(0, 10)}.json`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+    } catch (err) {
+      console.error('Export failed:', err)
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   // ── Load History ───────────────────────────────────────────────────────
   const loadHistory = useCallback(async () => {
@@ -432,6 +507,202 @@ export default function PrescriptionAnalysis() {
           </button>
         </div>
       </div>
+
+      {/* ── Action Area (Exact Recommended Layout from Mockup) ───────────── */}
+      <div className="glass p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 border border-white/10 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-violet-600/10 text-violet-400 border border-violet-500/20">
+            <Pill className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-white tracking-wide">Prescription Analyzer</h2>
+            <span className="text-[11px] text-slate-400">One prescription connected across entire care network</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-500/10"
+          >
+            <Plus size={14} /> Add Prescription
+          </button>
+
+          <button
+            onClick={() => {
+              if (!selectedPrescription && prescriptions.length > 0) {
+                setSelectedPrescription(prescriptions[0])
+              }
+              setIsEditModalOpen(true)
+            }}
+            disabled={prescriptions.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
+          >
+            <Edit3 size={14} /> Edit
+          </button>
+
+          <button
+            onClick={() => {
+              if (!selectedPrescription && prescriptions.length > 0) {
+                setSelectedPrescription(prescriptions[0])
+              }
+              setIsArchiveModalOpen(true)
+            }}
+            disabled={prescriptions.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
+          >
+            <Trash2 size={14} /> Delete / Archive
+          </button>
+
+          <button
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Clock size={14} /> View History
+          </button>
+
+          <button
+            onClick={() => setIsClearModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <RotateCcw size={14} /> Clear History
+          </button>
+
+          <button
+            onClick={handleDownloadReport}
+            disabled={isExporting}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-50"
+          >
+            <Download size={14} /> {isExporting ? 'Exporting...' : 'Download Report'}
+          </button>
+        </div>
+      </div>
+
+      {/* ── Dashboard Metrics Cards ────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="glass p-3.5 rounded-xl border border-white/5 space-y-1">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Prescriptions</div>
+          <div className="text-xl font-bold text-white">
+            {dashboardMetrics?.total_prescriptions ?? prescriptions.length}
+          </div>
+          <div className="text-[10px] text-slate-500">In patient health record</div>
+        </div>
+        <div className="glass p-3.5 rounded-xl border border-white/5 space-y-1">
+          <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">Active Regimen</div>
+          <div className="text-xl font-bold text-emerald-300">
+            {dashboardMetrics?.active_prescriptions ?? prescriptions.filter(p => p.status === 'active').length}
+          </div>
+          <div className="text-[10px] text-emerald-500/80">Synchronized with meds</div>
+        </div>
+        <div className="glass p-3.5 rounded-xl border border-white/5 space-y-1">
+          <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider">Verification Pending</div>
+          <div className="text-xl font-bold text-amber-300">
+            {dashboardMetrics?.pending_verification ?? prescriptions.filter(p => !p.is_verified).length}
+          </div>
+          <div className="text-[10px] text-amber-500/80">Awaiting patient check</div>
+        </div>
+        <div className="glass p-3.5 rounded-xl border border-white/5 space-y-1">
+          <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Archived</div>
+          <div className="text-xl font-bold text-slate-300">
+            {dashboardMetrics?.archived_prescriptions ?? 0}
+          </div>
+          <div className="text-[10px] text-slate-500">Retained in EHR</div>
+        </div>
+        <div className="glass p-3.5 rounded-xl border border-white/5 space-y-1">
+          <div className="text-[10px] font-bold text-violet-400 uppercase tracking-wider">AI Analyses</div>
+          <div className="text-xl font-bold text-violet-300">
+            {dashboardMetrics?.recent_analyses ?? historyReports.length}
+          </div>
+          <div className="text-[10px] text-violet-500/80">Saved explanations</div>
+        </div>
+      </div>
+
+      {/* ── Active Prescriptions List & Quick Select ───────────────────────── */}
+      {prescriptions.length > 0 && (
+        <div className="glass p-4 rounded-2xl border border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-bold text-white flex items-center gap-2">
+              <ClipboardList size={14} className="text-violet-400" />
+              Connected Patient Prescriptions ({prescriptions.length})
+            </div>
+            <span className="text-[11px] text-slate-400">
+              Select an item to edit, archive, or inspect history
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+            {prescriptions.map((rx) => {
+              const isSelected = selectedPrescription?.id === rx.id
+              return (
+                <div
+                  key={rx.id}
+                  onClick={() => setSelectedPrescription(rx)}
+                  className={`p-3 rounded-xl border cursor-pointer transition text-left flex flex-col justify-between ${
+                    isSelected
+                      ? 'bg-violet-600/15 border-violet-500/50 shadow-md shadow-violet-500/10'
+                      : 'bg-white/3 border-white/5 hover:bg-white/5 hover:border-white/10'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="text-xs font-bold text-white truncate">
+                        {rx.medication_name}
+                      </span>
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                          rx.status === 'active'
+                            ? 'bg-emerald-500/15 text-emerald-400'
+                            : rx.status === 'pending_refill'
+                            ? 'bg-violet-500/15 text-violet-400'
+                            : 'bg-slate-500/15 text-slate-400'
+                        }`}
+                      >
+                        {rx.status}
+                      </span>
+                    </div>
+                    <div className="text-[11px] text-slate-300">
+                      {rx.dosage} • {rx.frequency}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      Prescriber: {rx.prescribing_doctor_name || 'Assigned MD'}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 mt-2 border-t border-white/5 text-[10px]">
+                    <span className="text-slate-500">
+                      {rx.is_verified ? '✓ Verified' : '● Patient-reported'}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedPrescription(rx)
+                          setIsEditModalOpen(true)
+                        }}
+                        className="text-slate-400 hover:text-white transition"
+                        title="Edit"
+                      >
+                        <Edit3 size={12} />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedPrescription(rx)
+                          setIsHistoryModalOpen(true)
+                        }}
+                        className="text-slate-400 hover:text-violet-300 transition"
+                        title="History"
+                      >
+                        <Clock size={12} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Medical Disclaimer */}
       <div className="p-3 rounded-xl bg-amber-500/8 border border-amber-500/15 flex items-start gap-3 text-xs text-amber-200/80">
@@ -1294,6 +1565,56 @@ export default function PrescriptionAnalysis() {
           )}
         </div>
       )}
+
+      {/* ── Modals ──────────────────────────────────────────────────────── */}
+      <AddPrescriptionModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={(newRx) => {
+          loadPrescriptions()
+          setSelectedPrescription(newRx)
+        }}
+      />
+
+      <EditPrescriptionModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        prescription={selectedPrescription}
+        onSuccess={(updated) => {
+          loadPrescriptions()
+          setSelectedPrescription(updated)
+        }}
+      />
+
+      <ArchivePrescriptionModal
+        isOpen={isArchiveModalOpen}
+        onClose={() => setIsArchiveModalOpen(false)}
+        prescription={selectedPrescription}
+        onSuccess={() => {
+          loadPrescriptions()
+          setSelectedPrescription(null)
+        }}
+      />
+
+      <PrescriptionHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        prescription={selectedPrescription}
+        onReopenAnalysis={(reportId) => {
+          viewHistoryReport(reportId)
+        }}
+        onRestored={() => {
+          loadPrescriptions()
+        }}
+      />
+
+      <ClearPrescriptionHistoryModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        onSuccess={() => {
+          loadPrescriptions()
+        }}
+      />
     </div>
   )
 }

@@ -19,9 +19,11 @@ import {
   PhoneCall,
   MapPin,
   ExternalLink,
+  Bluetooth,
   X,
 } from 'lucide-react'
 import { TestModeConsole } from '@/components/vitals/TestModeConsole'
+import { DeviceConnectModal } from '@/components/vitals/DeviceConnectModal'
 import {
   ResponsiveContainer,
   LineChart,
@@ -57,6 +59,7 @@ export default function BloodPressureTracking() {
   const [loading, setLoading] = useState(true)
   const [filterPeriod, setFilterPeriod] = useState<number>(30)
   const [showLogModal, setShowLogModal] = useState(false)
+  const [showDeviceModal, setShowDeviceModal] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
   const [alertBanner, setAlertBanner] = useState<{
@@ -289,7 +292,15 @@ export default function BloodPressureTracking() {
           </p>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <button
+            onClick={() => setShowDeviceModal(true)}
+            className="btn-secondary"
+            style={{ fontSize: '0.85rem' }}
+          >
+            <Bluetooth size={16} />
+            <span>Connect Bluetooth BP Monitor</span>
+          </button>
           <button
             onClick={() => setShowLogModal(true)}
             className="btn-primary"
@@ -405,17 +416,57 @@ export default function BloodPressureTracking() {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 16 }}>
         {/* Latest BP Card */}
         <div className="stat-card">
-          <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: 6 }}>
-            Latest Blood Pressure
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Latest Blood Pressure
+            </div>
+            {latest && (
+              <span
+                style={{
+                  fontSize: '0.7rem',
+                  fontWeight: 600,
+                  padding: '2px 8px',
+                  borderRadius: 6,
+                  background: latest.measurement_source === 'manual' ? 'rgba(148,163,184,0.12)' : 'rgba(16,185,129,0.15)',
+                  color: latest.measurement_source === 'manual' ? '#cbd5e1' : '#34d399',
+                  border: latest.measurement_source === 'manual' ? '1px solid rgba(148,163,184,0.2)' : '1px solid rgba(16,185,129,0.3)',
+                }}
+              >
+                {latest.device_name || (latest.measurement_source === 'manual' ? 'Manual Entry' : 'Device Sync')}
+              </span>
+            )}
           </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-            <span style={{ fontSize: '2.1rem', fontWeight: 800, color: '#f8fafc' }}>
-              {latest?.systolic_bp != null ? `${latest.systolic_bp}/${latest.diastolic_bp}` : '--/--'}
-            </span>
-            <span style={{ fontSize: '0.85rem', color: '#94a3b8', fontWeight: 500 }}>mmHg</span>
-          </div>
+
+          {latest?.systolic_bp != null ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+                background: 'rgba(15,23,42,0.65)',
+                padding: '10px 14px',
+                borderRadius: 10,
+                border: '1px solid rgba(255,255,255,0.06)',
+              }}
+            >
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+                • Systolic: <span style={{ color: '#38bdf8' }}>{latest.systolic_bp} mmHg</span>
+              </div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+                • Diastolic: <span style={{ color: '#38bdf8' }}>{latest.diastolic_bp} mmHg</span>
+              </div>
+              <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f8fafc', fontFamily: 'monospace' }}>
+                • Pulse: <span style={{ color: '#34d399' }}>{latest.heart_rate ?? 72} BPM</span>
+              </div>
+            </div>
+          ) : (
+            <div style={{ fontSize: '1.1rem', fontWeight: 600, color: '#64748b', padding: '12px 0' }}>
+              No reading recorded
+            </div>
+          )}
+
           {latest && (
-            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
               {(() => {
                 const badge = getCategoryBadge(latest.bp_category)
                 return (
@@ -1047,6 +1098,14 @@ export default function BloodPressureTracking() {
           </div>
         </div>
       )}
+
+      {/* Bluetooth Device Connect Modal */}
+      <DeviceConnectModal
+        isOpen={showDeviceModal}
+        onClose={() => setShowDeviceModal(false)}
+        onDeviceLinked={fetchReadings}
+        onOpenManualBp={() => setShowLogModal(true)}
+      />
     </div>
   )
 }

@@ -21,12 +21,74 @@ from app.api.v1 import (
 log = structlog.get_logger(__name__)
 
 
+import socket
+import threading
 from sqlalchemy import text
+
+def _start_ipv6_loopback_bridge(port: int = 8000):
+    """
+    On Windows, Chromium/Edge query IPv6 (::1) before IPv4 (127.0.0.1) for 'localhost'.
+    If the server listens only on 127.0.0.1, every request stalls for ~2.5s on IPv6 SYN timeout.
+    This bridge accepts IPv6 loopback connections on [::1]:port and pipes them to 127.0.0.1:port,
+    ensuring near-instant (0.01s) loading on http://localhost:8000.
+    """
+    bridge_sock = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+    try:
+        bridge_sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        bridge_sock.bind(('::1', port))
+        bridge_sock.listen(128)
+    except Exception:
+        bridge_sock.close()
+        return None
+
+    stop_event = threading.Event()
+
+    def forward(src, dst):
+        try:
+            while not stop_event.is_set():
+                data = src.recv(65536)
+                if not data:
+                    break
+                dst.sendall(data)
+        except Exception:
+            pass
+        finally:
+            try:
+                src.close()
+            except Exception:
+                pass
+            try:
+                dst.close()
+            except Exception:
+                pass
+
+    def run_bridge():
+        bridge_sock.settimeout(1.0)
+        while not stop_event.is_set():
+            try:
+                c6, _ = bridge_sock.accept()
+                c4 = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                c4.connect(('127.0.0.1', port))
+                threading.Thread(target=forward, args=(c6, c4), daemon=True).start()
+                threading.Thread(target=forward, args=(c4, c6), daemon=True).start()
+            except socket.timeout:
+                continue
+            except Exception:
+                break
+        try:
+            bridge_sock.close()
+        except Exception:
+            pass
+
+    t = threading.Thread(target=run_bridge, daemon=True)
+    t.start()
+    return stop_event
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application startup / shutdown lifecycle."""
     log.info("MediCare API starting", environment=settings.ENVIRONMENT)
+    bridge_stop = _start_ipv6_loopback_bridge(8000)
     
     # 1. Create tables and apply self-healing column migrations safely
     try:
@@ -42,6 +104,8 @@ async def lifespan(app: FastAPI):
         log.warning("Seeding skipped or encountered error", error=str(e))
     yield
     log.info("MediCare API shutting down")
+    if bridge_stop:
+        bridge_stop.set()
     await engine.dispose()
 
 
@@ -91,10 +155,45 @@ app.include_router(medical_report_analysis.router, prefix="/api/v1")
 app.include_router(devices.router, prefix="/api/v1")
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# ── Health Endpoints ──────────────────────────────────────────────────────────
+from datetime import datetime, timezone
+from sqlalchemy import text
+
+async def _perform_health_check():
+    """Validates backend availability and database ping without exposing secrets."""
+    db_status = "disconnected"
+    try:
+        async with AsyncSessionFactory() as session:
+            await session.execute(text("SELECT 1"))
+            db_status = "connected"
+    except Exception as e:
+        log.warning("Health check database ping failed", error=str(e))
+        db_status = "degraded"
+
+    overall_status = "healthy" if db_status == "connected" else "degraded"
+    return {
+        "status": overall_status,
+        "backend": "online",
+        "database": db_status,
+        "version": settings.APP_VERSION,
+        "environment": settings.ENVIRONMENT,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
+@app.get("/health", tags=["health"])
+async def root_health_check():
+    return await _perform_health_check()
+
+
 @app.get("/api/health", tags=["health"])
-async def health_check():
-    return {"status": "ok", "version": settings.APP_VERSION, "env": settings.ENVIRONMENT}
+async def api_health_check():
+    return await _perform_health_check()
+
+
+@app.get("/api/v1/health", tags=["health"])
+async def api_v1_health_check():
+    return await _perform_health_check()
 
 
 # ── Static Files & SPA Frontend ───────────────────────────────────────────────

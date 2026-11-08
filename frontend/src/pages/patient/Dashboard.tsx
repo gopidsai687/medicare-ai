@@ -12,96 +12,226 @@ import {
   Sparkles,
   ShieldCheck,
   Zap,
+  RefreshCw,
+  Clock,
+  FileText,
 } from 'lucide-react'
 import { useAuth } from '@/lib/auth'
 import api from '@/lib/api'
 import { BodyMap } from '@/components/vitals/BodyMap'
 
-const stats = [
-  { label: 'Upcoming Appointments', value: '2', icon: Calendar, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', path: '/patient/appointments' },
-  { label: 'Active Medications', value: '4', icon: Activity, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', path: '/patient/medications' },
-  { label: 'Recent Lab Results', value: '1', icon: FlaskConical, color: '#34d399', bg: 'rgba(52,211,153,0.1)', path: '/patient/reports' },
-  { label: 'Medical Documents', value: '12', icon: ClipboardList, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', path: '/patient/records' },
-]
+interface VitalItemData {
+  has_data: boolean
+  label: string
+  value: string
+  unit: string
+  status: string
+  status_label: string
+  category: string
+  color: string
+  recorded_at: string | null
+  elapsed_time: string
+  source: string | null
+  device_name: string | null
+  verification_status: string
+  path: string
+}
 
-const recentActivity = [
-  { type: 'Lab Result', title: 'Complete Blood Count (CBC)', date: 'Sep 18, 2026', status: 'Normal', statusClass: 'badge-green', path: '/patient/reports' },
-  { type: 'Appointment', title: 'Dr. Sarah Chen — Cardiology', date: 'Sep 25, 2026', status: 'Upcoming', statusClass: 'badge-blue', path: '/patient/appointments' },
-  { type: 'Prescription', title: 'Metformin 500mg — Refill', date: 'Sep 15, 2026', status: 'Active', statusClass: 'badge-teal', path: '/patient/prescriptions' },
-  { type: 'Visit', title: 'Annual Physical Examination', date: 'Aug 30, 2026', status: 'Completed', statusClass: 'badge-gray', path: '/patient/records' },
-]
-
-const vitals = [
-  { label: 'Blood Pressure', value: '118/76', unit: 'mmHg', status: 'Normal', color: '#34d399', path: '/patient/vitalsense/blood-pressure' },
-  { label: 'Heart Rate', value: '72', unit: 'bpm', status: 'Normal', color: '#34d399', path: '/patient/vitalsense' },
-  { label: 'Blood Glucose', value: '94', unit: 'mg/dL', status: 'Normal', color: '#34d399', path: '/patient/vitalsense/blood-glucose' },
-  { label: 'BMI', value: '23.4', unit: 'kg/m²', status: 'Normal', color: '#34d399', path: '/patient/profile' },
-]
+interface DashboardPayload {
+  patient_id: string
+  patient_name: string
+  mrn: string
+  evaluated_at: string
+  stats: {
+    upcoming_appointments: number
+    active_medications: number
+    recent_lab_results: number
+    medical_documents: number
+  }
+  vitals: {
+    blood_pressure: VitalItemData
+    heart_rate: VitalItemData
+    blood_glucose: VitalItemData
+    bmi: VitalItemData
+  }
+  recent_activity: Array<{
+    type: string
+    title: string
+    date: string
+    relative_time: string
+    status: string
+    status_class: string
+    path: string
+  }>
+  diagnostics_hud?: any
+  educational_disclaimer?: string
+}
 
 export default function PatientDashboard() {
   const { user } = useAuth()
   const navigate = useNavigate()
-  const [dashboardStats, setDashboardStats] = useState(stats)
-  const [isLive, setIsLive] = useState(false)
+  const [data, setData] = useState<DashboardPayload | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [refreshKey, setRefreshKey] = useState(0)
+
+  const fetchDashboardData = async () => {
+    try {
+      setLoading(true)
+      const res = await api.get('/api/v1/patients/dashboard')
+      setData(res.data)
+    } catch (err) {
+      console.error('Failed to load patient dashboard telemetry:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
 
   useEffect(() => {
-    async function loadPatientData() {
-      try {
-        const [apptsRes, rxRes, labsRes] = await Promise.allSettled([
-          api.get('/api/v1/appointments'),
-          api.get('/api/v1/prescriptions'),
-          api.get('/api/v1/labs'),
-        ])
+    fetchDashboardData()
+  }, [refreshKey])
 
-        const apptCount = apptsRes.status === 'fulfilled' && Array.isArray(apptsRes.value.data)
-          ? apptsRes.value.data.length : 2
-        const rxCount = rxRes.status === 'fulfilled' && Array.isArray(rxRes.value.data)
-          ? rxRes.value.data.length : 4
-        const labsCount = labsRes.status === 'fulfilled' && Array.isArray(labsRes.value.data)
-          ? labsRes.value.data.length : 1
+  const statsCards = [
+    {
+      label: 'Upcoming Appointments',
+      value: String(data?.stats?.upcoming_appointments ?? 0),
+      icon: Calendar,
+      color: '#3182f4',
+      bg: 'rgba(49,130,244,0.1)',
+      path: '/patient/appointments',
+    },
+    {
+      label: 'Active Medications',
+      value: String(data?.stats?.active_medications ?? 0),
+      icon: Activity,
+      color: '#14b8a6',
+      bg: 'rgba(20,184,166,0.1)',
+      path: '/patient/medications',
+    },
+    {
+      label: 'Recent Lab Results',
+      value: String(data?.stats?.recent_lab_results ?? 0),
+      icon: FlaskConical,
+      color: '#34d399',
+      bg: 'rgba(52,211,153,0.1)',
+      path: '/patient/labs',
+    },
+    {
+      label: 'Medical Documents',
+      value: String(data?.stats?.medical_documents ?? 0),
+      icon: ClipboardList,
+      color: '#f59e0b',
+      bg: 'rgba(245,158,11,0.1)',
+      path: '/patient/records',
+    },
+  ]
 
-        setDashboardStats([
-          { label: 'Upcoming Appointments', value: String(apptCount), icon: Calendar, color: '#3182f4', bg: 'rgba(49,130,244,0.1)', path: '/patient/appointments' },
-          { label: 'Active Medications', value: String(rxCount), icon: Activity, color: '#14b8a6', bg: 'rgba(20,184,166,0.1)', path: '/patient/medications' },
-          { label: 'Recent Lab Results', value: String(labsCount), icon: FlaskConical, color: '#34d399', bg: 'rgba(52,211,153,0.1)', path: '/patient/reports' },
-          { label: 'Medical Documents', value: '12', icon: ClipboardList, color: '#f59e0b', bg: 'rgba(245,158,11,0.1)', path: '/patient/records' },
-        ])
-        setIsLive(true)
-      } catch (err) {
-        console.warn('Patient dashboard stats fallback:', err)
-      }
-    }
-    loadPatientData()
-  }, [])
+  const vitalsCards: VitalItemData[] = [
+    data?.vitals?.blood_pressure || {
+      has_data: false,
+      label: 'Blood Pressure',
+      value: '--',
+      unit: 'mmHg',
+      status: 'No Data',
+      status_label: 'NO DATA',
+      category: 'No Telemetry Recorded',
+      color: '#64748b',
+      recorded_at: null,
+      elapsed_time: 'Never recorded',
+      source: null,
+      device_name: null,
+      verification_status: 'No Data Recorded',
+      path: '/patient/vitalsense/blood-pressure',
+    },
+    data?.vitals?.heart_rate || {
+      has_data: false,
+      label: 'Heart Rate',
+      value: '--',
+      unit: 'bpm',
+      status: 'No Data',
+      status_label: 'NO DATA',
+      category: 'No Telemetry Recorded',
+      color: '#64748b',
+      recorded_at: null,
+      elapsed_time: 'Never recorded',
+      source: null,
+      device_name: null,
+      verification_status: 'No Data Recorded',
+      path: '/patient/vitalsense',
+    },
+    data?.vitals?.blood_glucose || {
+      has_data: false,
+      label: 'Blood Glucose',
+      value: '--',
+      unit: 'mg/dL',
+      status: 'No Data',
+      status_label: 'NO DATA',
+      category: 'No Telemetry Recorded',
+      color: '#64748b',
+      recorded_at: null,
+      elapsed_time: 'Never recorded',
+      source: null,
+      device_name: null,
+      verification_status: 'No Data Recorded',
+      path: '/patient/vitalsense/blood-glucose',
+    },
+    data?.vitals?.bmi || {
+      has_data: false,
+      label: 'BMI',
+      value: '--',
+      unit: 'kg/m²',
+      status: 'No Data',
+      status_label: 'NO DATA',
+      category: 'No Telemetry Recorded',
+      color: '#64748b',
+      recorded_at: null,
+      elapsed_time: 'Never recorded',
+      source: null,
+      device_name: null,
+      verification_status: 'No Data Recorded',
+      path: '/patient/profile',
+    },
+  ]
 
   return (
     <div>
       {/* Header */}
       <div className="page-header animate-fade-in-up">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <div style={{ width: 44, height: 44, borderRadius: 12,
-            background: 'linear-gradient(135deg, rgba(20,184,166,0.2), rgba(49,130,244,0.2))',
-            border: '1px solid rgba(20,184,166,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Heart size={20} style={{ color: '#2dd4bf' }} />
-          </div>
-          <div>
-            <h1 className="page-title flex items-center gap-3">
-              Welcome back, {user?.full_name ? user.full_name.split(' ')[0] : 'Patient'}
-              {isLive && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 16 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{ width: 44, height: 44, borderRadius: 12,
+              background: 'linear-gradient(135deg, rgba(20,184,166,0.2), rgba(49,130,244,0.2))',
+              border: '1px solid rgba(20,184,166,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Heart size={20} style={{ color: '#2dd4bf' }} />
+            </div>
+            <div>
+              <h1 className="page-title flex items-center gap-3">
+                Welcome back, {user?.full_name ? user.full_name.split(' ')[0] : (data?.patient_name ? data.patient_name.split(' ')[0] : 'Patient')}
                 <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
                   LIVE HEALTH FEED
                 </span>
-              )}
-            </h1>
-            <p className="page-subtitle">Here's your personal health overview for today</p>
+              </h1>
+              <p className="page-subtitle">Personal health records &amp; telemetry overview {data?.mrn ? `• MRN: ${data.mrn}` : ''}</p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <button
+              onClick={() => setRefreshKey((k) => k + 1)}
+              disabled={loading}
+              className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium cursor-pointer transition-all flex items-center gap-2"
+              title="Refresh live patient telemetry"
+            >
+              <RefreshCw size={13} className={loading ? 'animate-spin text-teal-400' : ''} />
+              <span>Refresh Feed</span>
+            </button>
           </div>
         </div>
       </div>
 
       {/* Stats grid */}
       <div className="stagger" style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 28 }}>
-        {dashboardStats.map(({ label, value, icon: Icon, color, bg, path }) => (
+        {statsCards.map(({ label, value, icon: Icon, color, bg, path }) => (
           <div
             key={label}
             onClick={() => navigate(path)}
@@ -231,7 +361,7 @@ export default function PatientDashboard() {
 
       {/* Body Map Anatomical Status */}
       <div className="animate-fade-in-up" style={{ marginBottom: 28 }}>
-        <BodyMap />
+        <BodyMap refreshKey={refreshKey} />
       </div>
 
       {/* Quick Navigation Cards: VitalSense Specific Portals */}
@@ -260,7 +390,7 @@ export default function PatientDashboard() {
               <ArrowRight size={13} color="#2dd4bf" />
             </div>
             <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#f8fafc' }}>Blood Glucose Tracker</div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>mg/dL & mmol/L, TIR, CGM sync</div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>mg/dL &amp; mmol/L, TIR, CGM sync</div>
           </div>
 
           <div
@@ -272,7 +402,7 @@ export default function PatientDashboard() {
               <Zap size={20} color="#ef4444" />
               <ArrowRight size={13} color="#ef4444" />
             </div>
-            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fca5a5' }}>Emergency & Hospitals</div>
+            <div style={{ fontSize: '0.95rem', fontWeight: 700, color: '#fca5a5' }}>Emergency &amp; Hospitals</div>
             <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: 2 }}>Instant 911, verified ER facilities</div>
           </div>
 
@@ -295,71 +425,121 @@ export default function PatientDashboard() {
         {/* Recent activity */}
         <div className="glass animate-fade-in-up" style={{ animationDelay: '120ms', padding: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
-            <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: 0 }}>Recent Activity</h2>
+            <div>
+              <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: 0 }}>
+                Recent Activity
+              </h2>
+              <span style={{ fontSize: '0.72rem', color: '#5a7a9e' }}>
+                Chronological timeline of clinical records &amp; events
+              </span>
+            </div>
             <button
               onClick={() => navigate('/patient/records')}
               className="btn-secondary cursor-pointer hover:bg-slate-700/50 transition-colors"
               style={{ padding: '6px 14px', fontSize: '0.75rem' }}
             >
-              View All
+              View All Records
             </button>
           </div>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th>Description</th>
-                <th>Date</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentActivity.map((item) => (
-                <tr
-                  key={item.title}
-                  onClick={() => item.path && navigate(item.path)}
-                  className="cursor-pointer hover:bg-white/[0.04] transition-colors"
-                  title={`Open ${item.type}`}
-                >
-                  <td style={{ color: '#5a7a9e', fontSize: '0.75rem' }}>{item.type}</td>
-                  <td style={{ fontWeight: 500 }}>{item.title}</td>
-                  <td style={{ color: '#5a7a9e', fontSize: '0.8rem' }}>{item.date}</td>
-                  <td><span className={`badge ${item.statusClass}`}>{item.status}</span></td>
+
+          {data?.recent_activity && data.recent_activity.length > 0 ? (
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Type</th>
+                  <th>Description</th>
+                  <th>Date</th>
+                  <th>Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.recent_activity.map((item, idx) => (
+                  <tr
+                    key={idx}
+                    onClick={() => item.path && navigate(item.path)}
+                    className="cursor-pointer hover:bg-white/[0.04] transition-colors"
+                    title={`Open ${item.type}`}
+                  >
+                    <td style={{ color: '#5a7a9e', fontSize: '0.75rem' }}>{item.type}</td>
+                    <td style={{ fontWeight: 500 }}>{item.title}</td>
+                    <td style={{ color: '#5a7a9e', fontSize: '0.8rem' }}>
+                      <span title={item.date}>{item.relative_time || item.date}</span>
+                    </td>
+                    <td><span className={`badge ${item.status_class}`}>{item.status}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="py-12 text-center text-slate-400 text-xs space-y-2">
+              <div className="w-9 h-9 rounded-full bg-slate-800 text-slate-500 mx-auto flex items-center justify-center">
+                <ClipboardList size={18} />
+              </div>
+              <p className="font-semibold text-slate-300">No Recent Activity</p>
+              <p className="text-[11px] text-slate-500 max-w-xs mx-auto">
+                No clinical events recorded yet. Scheduled visits, prescriptions, and lab results will appear here.
+              </p>
+            </div>
+          )}
         </div>
 
         {/* Vitals */}
         <div className="glass animate-fade-in-up" style={{ animationDelay: '180ms', padding: 24 }}>
-          <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: '0 0 20px' }}>
-            Latest Vitals
-          </h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+            <h2 style={{ fontFamily: 'Outfit, sans-serif', fontSize: '1rem', fontWeight: 700, color: '#e2eaf4', margin: 0 }}>
+              Latest Vitals
+            </h2>
+            <span style={{ fontSize: '0.7rem', color: '#5a7a9e' }}>
+              Live Telemetry
+            </span>
+          </div>
+
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {vitals.map(({ label, value, unit, status, color, path }) => (
+            {vitalsCards.map((vital) => (
               <div
-                key={label}
-                onClick={() => path && navigate(path)}
+                key={vital.label}
+                onClick={() => vital.path && navigate(vital.path)}
                 className="glass-sm cursor-pointer hover:border-blue-500/40 hover:bg-white/[0.03] transition-all group"
                 style={{ padding: '14px 16px' }}
-                title={`View ${label} details`}
+                title={`View ${vital.label} details`}
               >
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                  <span style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>{label}</span>
+                  <span style={{ fontSize: '0.78rem', color: '#5a7a9e' }}>{vital.label}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span style={{ fontSize: '0.7rem', fontWeight: 600, color, background: `${color}18`,
-                      border: `1px solid ${color}30`, borderRadius: 20, padding: '1px 8px' }}>{status}</span>
+                    <span
+                      style={{
+                        fontSize: '0.7rem',
+                        fontWeight: 600,
+                        color: vital.color,
+                        background: `${vital.color}18`,
+                        border: `1px solid ${vital.color}30`,
+                        borderRadius: 20,
+                        padding: '1px 8px',
+                      }}
+                    >
+                      {vital.status}
+                    </span>
                     <ArrowRight size={12} className="text-slate-600 group-hover:text-blue-400 transition-colors" />
                   </div>
                 </div>
+
                 <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                  <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#e2eaf4' }}>{value}</span>
-                  <span style={{ fontSize: '0.75rem', color: '#3a5070' }}>{unit}</span>
+                  <span style={{ fontSize: '1.4rem', fontWeight: 700, color: '#e2eaf4' }}>{vital.value}</span>
+                  <span style={{ fontSize: '0.75rem', color: '#5a7a9e' }}>{vital.unit}</span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style={{ fontSize: '0.68rem', color: '#64748b', fontFamily: 'monospace' }}>
+                    {vital.verification_status}
+                  </span>
+                  <span style={{ fontSize: '0.68rem', color: '#64748b' }}>
+                    {vital.elapsed_time}
+                  </span>
                 </div>
               </div>
             ))}
           </div>
+
           <button
             onClick={() => navigate('/patient/vitalsense')}
             className="w-full mt-4 py-2 px-3 rounded-xl bg-blue-600/20 hover:bg-blue-600/30 text-blue-400 border border-blue-500/30 text-xs font-semibold flex items-center justify-center gap-1.5 cursor-pointer transition-all"

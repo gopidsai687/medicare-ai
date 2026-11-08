@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import {
   Heart,
   Activity,
@@ -17,26 +18,45 @@ import {
   FileText,
   Download,
   Plus,
+  ArrowRight,
+  ExternalLink,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { format } from 'date-fns'
 import { DigitalTwinHUD } from './DigitalTwinHUD'
 
 export interface BodyMapIndicator {
-  system_name: string
-  label: string
+  system_key?: string
+  system_name?: string
+  label?: string
+  display_name?: string
   status: 'normal' | 'attention' | 'urgent' | 'stale' | 'unavailable'
-  status_label: string
-  measurement_type: string
+  status_label?: string
+  measurement_type?: string
   latest_value: string | null
+  current_value?: string | null
   latest_unit: string | null
+  unit?: string | null
   recorded_at: string | null
+  measured_at?: string | null
   measurement_source: string | null
   is_sample: boolean
-  clinical_summary: string
+  clinical_summary?: string
+  guidance?: string
   trend: 'improving' | 'stable' | 'deteriorating' | 'insufficient_data'
   history_count: number
+  history_points?: Array<{
+    value: string
+    unit?: string
+    systolic?: number
+    diastolic?: number
+    recorded_at: string | null
+    source?: string
+    device_name?: string
+    is_device?: boolean
+  }>
   urgency_level: 'none' | 'low' | 'moderate' | 'high' | 'critical'
+  target_page?: string
 }
 
 interface BodyMapProps {
@@ -47,9 +67,11 @@ interface BodyMapProps {
 }
 
 export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: BodyMapProps) {
+  const navigate = useNavigate()
   const [data, setData] = useState<{
     evaluated_at: string
     indicators: Record<string, BodyMapIndicator>
+    overall_health_status?: string
     overall_status: string
     disclaimer: string
   } | null>(null)
@@ -86,36 +108,37 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
     fetchBodyMap()
   }, [patientId, refreshKey])
 
-  const getStatusBadge = (status?: string) => {
+  const getStatusBadge = (status?: string, status_label?: string) => {
     switch (status) {
       case 'urgent':
         return (
           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse">
-            Urgent Review
+            {status_label || 'Urgent Review'}
           </span>
         )
       case 'attention':
         return (
           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/40">
-            Attention State
+            {status_label || 'Attention State'}
           </span>
         )
       case 'normal':
         return (
           <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-            Within Target Band
+            {status_label || 'Within Target Band'}
           </span>
         )
       case 'stale':
         return (
           <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700">
-            Stale Telemetry (&gt;7d)
+            {status_label || 'Stale Telemetry (>14d)'}
           </span>
         )
+      case 'unavailable':
       default:
         return (
-          <span className="px-2 py-0.5 rounded text-[10px] font-medium uppercase tracking-wider bg-slate-800 text-slate-500 border border-slate-700">
-            No Telemetry Recorded
+          <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-slate-800 text-slate-400 border border-slate-700">
+            {status_label || 'NO DATA'}
           </span>
         )
     }
@@ -129,8 +152,11 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
         return { text: '#f59e0b', bg: 'rgba(245,158,11,0.15)', border: 'rgba(245,158,11,0.4)', dot: '#f59e0b' }
       case 'normal':
         return { text: '#10b981', bg: 'rgba(16,185,129,0.15)', border: 'rgba(16,185,129,0.4)', dot: '#10b981' }
+      case 'stale':
+        return { text: '#94a3b8', bg: 'rgba(148,163,184,0.15)', border: 'rgba(148,163,184,0.3)', dot: '#94a3b8' }
+      case 'unavailable':
       default:
-        return { text: '#64748b', bg: 'rgba(100,116,139,0.1)', border: 'rgba(100,116,139,0.25)', dot: '#64748b' }
+        return { text: '#64748b', bg: 'rgba(100,116,139,0.12)', border: 'rgba(100,116,139,0.25)', dot: '#64748b' }
     }
   }
 
@@ -459,95 +485,144 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
                 </div>
 
                 <div className="flex flex-col items-end gap-1">
-                  {getStatusBadge(activeIndicator.status)}
+                  {getStatusBadge(activeIndicator.status, activeIndicator.status_label)}
                   <span className="text-[10px] text-slate-500 font-mono">
-                    {activeIndicator.history_count} total measurements logged
+                    {activeIndicator.history_count ?? 0} total measurements logged
                   </span>
                 </div>
               </div>
 
               {/* Metric & Value Panel or Empty State */}
               {activeIndicator.latest_value != null ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Latest Telemetry Card */}
-                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
-                    <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                      Latest Recorded Telemetry
-                    </span>
-                    <div className="flex items-baseline gap-1.5 font-mono">
-                      <span className="text-2xl font-extrabold text-white">
-                        {activeIndicator.latest_value}
+                <div className="space-y-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {/* Latest Telemetry Card */}
+                    <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+                        Latest Recorded Telemetry
                       </span>
-                      <span className="text-xs font-semibold text-slate-400">
-                        {activeIndicator.latest_unit}
-                      </span>
+                      <div className="flex items-baseline gap-1.5 font-mono">
+                        <span className="text-2xl font-extrabold text-white">
+                          {activeIndicator.latest_value}
+                        </span>
+                        <span className="text-xs font-semibold text-slate-400">
+                          {activeIndicator.latest_unit}
+                        </span>
+                      </div>
+
+                      <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-400">
+                        <span className="flex items-center gap-1">
+                          <Clock size={11} className="text-slate-500" />
+                          {activeIndicator.recorded_at
+                            ? format(new Date(activeIndicator.recorded_at), 'MMM d, h:mm a')
+                            : 'Recorded'}
+                        </span>
+                        <span className="text-slate-400 capitalize">
+                          Trend: {(activeIndicator.trend || 'insufficient_data').replace('_', ' ')}
+                        </span>
+                      </div>
                     </div>
 
-                    <div className="pt-2 border-t border-slate-800/60 flex items-center justify-between text-[10px] text-slate-400">
-                      <span className="flex items-center gap-1">
-                        <Clock size={11} className="text-slate-500" />
-                        {activeIndicator.recorded_at
-                          ? format(new Date(activeIndicator.recorded_at), 'MMM d, h:mm a')
-                          : 'Recorded'}
-                      </span>
-                      <span className="text-slate-400 capitalize">
-                        Trend: {activeIndicator.trend.replace('_', ' ')}
+                    {/* Provenance Card */}
+                    <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 flex flex-col justify-between">
+                      <div>
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
+                          Measurement Provenance
+                        </span>
+                        <div>
+                          {activeIndicator.is_sample ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              <FlaskConical size={10} /> DEMO DATA
+                            </span>
+                          ) : activeIndicator.measurement_source?.includes('device') ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
+                              <ShieldCheck size={10} /> REAL DEVICE DATA
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
+                              <FileText size={10} /> Manual Entry — Not Device Verified
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <span className="text-[10px] text-slate-500 font-mono">
+                        Attribution: {activeIndicator.measurement_source || 'Manual patient input'}
                       </span>
                     </div>
                   </div>
 
-                  {/* Provenance Card */}
-                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2 flex flex-col justify-between">
-                    <div>
-                      <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 block mb-1">
-                        Measurement Provenance
-                      </span>
-                      <div>
-                        {activeIndicator.is_sample ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-amber-500/15 text-amber-300 border border-amber-500/30">
-                            <FlaskConical size={10} /> DEMO DATA
-                          </span>
-                        ) : activeIndicator.measurement_source?.includes('device') ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase tracking-wider bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-                            <ShieldCheck size={10} /> REAL DEVICE DATA
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">
-                            <FileText size={10} /> Manual Entry — Not Device Verified
-                          </span>
-                        )}
+                  {/* Previous Historical Readings Table */}
+                  {activeIndicator.history_points && activeIndicator.history_points.length > 0 && (
+                    <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800/80 space-y-2">
+                      <div className="flex items-center justify-between text-xs pb-1.5 border-b border-slate-800/60">
+                        <span className="font-semibold text-slate-300">Previous Readings History</span>
+                        <span className="text-[10px] text-slate-500 font-mono">
+                          Recent {activeIndicator.history_points.length} measurements
+                        </span>
+                      </div>
+                      <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                        {activeIndicator.history_points.map((pt, idx) => (
+                          <div
+                            key={idx}
+                            className="flex items-center justify-between py-1.5 px-2.5 rounded-lg bg-slate-950/60 border border-slate-800/50 text-xs"
+                          >
+                            <span className="font-mono font-bold text-white">
+                              {pt.value} {pt.unit || ''}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-400 font-mono">
+                                {pt.recorded_at ? format(new Date(pt.recorded_at), 'MMM d, h:mm a') : '--'}
+                              </span>
+                              {pt.source?.includes('device') || pt.is_device ? (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                                  DEVICE
+                                </span>
+                              ) : (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                                  MANUAL
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     </div>
+                  )}
 
-                    <span className="text-[10px] text-slate-500 font-mono">
-                      Attribution: {activeIndicator.measurement_source || 'Manual patient input'}
+                  {/* Clinical Interpretation & Guidance */}
+                  <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5 text-xs">
+                    <span className="font-semibold text-white block">
+                      Guideline Interpretation &amp; Physiological Scope
                     </span>
+                    <p className="text-slate-300 leading-relaxed text-[11px]">
+                      {activeIndicator.clinical_summary || activeIndicator.guidance}
+                    </p>
                   </div>
                 </div>
               ) : (
                 /* Empty state for this organ */
                 <div className="p-6 rounded-xl bg-slate-900/50 border border-slate-800 text-center space-y-2.5">
-                  <div className="w-9 h-9 rounded-full bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
-                    <Activity size={18} />
+                  <div className="w-10 h-10 rounded-full bg-slate-800 text-slate-400 mx-auto flex items-center justify-center">
+                    <Activity size={20} />
                   </div>
                   <p className="text-xs font-semibold text-slate-300">
-                    No Telemetry Recorded for {activeIndicator.label}
+                    No Telemetry Recorded for {activeIndicator.label || 'this system'}
                   </p>
                   <p className="text-[11px] text-slate-500 max-w-sm mx-auto leading-relaxed">
-                    Log a measurement using Mode B (Manual Entry) or connect a compatible medical monitor to populate this physiological indicator.
+                    Log a measurement using manual entry or connect a compatible medical monitor to populate this physiological indicator.
                   </p>
+                  <div className="pt-2">
+                    <button
+                      onClick={() => navigate(activeIndicator.target_page || '/patient/vitals')}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/30 text-xs font-semibold cursor-pointer transition-colors"
+                    >
+                      <Plus size={13} />
+                      <span>Log {activeIndicator.label || 'Reading'}</span>
+                    </button>
+                  </div>
                 </div>
               )}
-
-              {/* Clinical Summary */}
-              <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5 text-xs">
-                <span className="font-semibold text-white block">
-                  Guideline Interpretation &amp; Physiological Scope
-                </span>
-                <p className="text-slate-300 leading-relaxed text-[11px]">
-                  {activeIndicator.clinical_summary}
-                </p>
-              </div>
             </div>
           ) : (
             <div className="py-12 text-center text-slate-500 text-xs">
@@ -558,18 +633,29 @@ export function BodyMap({ patientId, compact = false, onLogClick, refreshKey }: 
           {/* Drawer Footer Actions */}
           <div className="pt-3 border-t border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
             <span className="text-slate-500 text-[10px] italic">
-              Organ status evaluated from recorded parameters • Not an optical scan
+              Organ status evaluated from recorded parameters • Educational model, not an optical scan
             </span>
 
-            {onLogClick && (
-              <button
-                onClick={() => onLogClick(activeIndicator?.measurement_type || 'bp')}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold cursor-pointer transition-colors"
-              >
-                <Plus size={13} />
-                <span>Log {activeIndicator?.label || 'Reading'}</span>
-              </button>
-            )}
+            <div className="flex items-center gap-2">
+              {activeIndicator?.target_page && (
+                <button
+                  onClick={() => navigate(activeIndicator.target_page!)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-medium cursor-pointer transition-colors"
+                >
+                  <span>Open {activeIndicator.label || 'Tracker'}</span>
+                  <ExternalLink size={12} />
+                </button>
+              )}
+              {onLogClick && (
+                <button
+                  onClick={() => onLogClick(activeIndicator?.measurement_type || 'bp')}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal-600 hover:bg-teal-500 text-white font-semibold cursor-pointer transition-colors"
+                >
+                  <Plus size={13} />
+                  <span>Log {activeIndicator?.label || 'Reading'}</span>
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

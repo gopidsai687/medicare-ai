@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import {
   Heart,
   Droplets,
@@ -24,6 +25,7 @@ import {
   Trash2,
   X,
   AlertCircle,
+  Info,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { BodyMap } from '@/components/vitals/BodyMap'
@@ -40,6 +42,12 @@ import {
 } from '@/components/vitals/LogVitalsModals'
 import { DeviceConnectModal } from '@/components/vitals/DeviceConnectModal'
 import { RemindersConsentModal, SharingConsentItem } from '@/components/vitals/RemindersConsentModal'
+import { FingerprintScannerGraphic } from '@/components/vitals/FingerprintScannerGraphic'
+import {
+  OverviewDashboardCards,
+  OverviewTelemetryData,
+} from '@/components/vitals/OverviewDashboardCards'
+import { DeviceConnectionCenter } from '@/components/vitals/DeviceConnectionCenter'
 
 export interface VitalSignRecord {
   id: string
@@ -101,12 +109,26 @@ export default function VitalSense() {
   const [trendAnalysis, setTrendAnalysis] = useState<any>(null)
   const [analyzingTrends, setAnalyzingTrends] = useState(false)
 
+  // Smart Health Dashboard Overview Data
+  const [dashboardSummary, setDashboardSummary] = useState<OverviewTelemetryData | null>(null)
+
   // Active Device State
   const [pairedDeviceName, setPairedDeviceName] = useState<string | null>(null)
 
   // ---------------------------------------------------------------------------
   // Data Fetching
   // ---------------------------------------------------------------------------
+  const fetchDashboardSummary = async () => {
+    try {
+      const res = await api.get('/api/v1/vitals/dashboard-summary')
+      if (res.data) {
+        setDashboardSummary(res.data)
+      }
+    } catch (err) {
+      console.warn('Dashboard summary fetch fallback:', err)
+    }
+  }
+
   const fetchVitals = async () => {
     try {
       setLoading(true)
@@ -157,6 +179,7 @@ export default function VitalSense() {
   }
 
   useEffect(() => {
+    fetchDashboardSummary()
     fetchVitals()
     fetchAlerts()
     fetchReminders()
@@ -413,7 +436,91 @@ export default function VitalSense() {
         </div>
       </div>
 
-      {/* ── 2. Three Clearly Separated Measurement Modes Hub ────────────────── */}
+      {/* ── 2. Side-by-Side: VitalSense Fingerprint Screen + Health Monitoring Dashboard (Recommended Final Design) ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">
+        {/* Left Card: VitalSense Fingerprint Screen (Visual Identity & Navigation) */}
+        <div className="lg:col-span-5 flex flex-col justify-between rounded-3xl bg-[#060c18] border-2 border-[#00ff88]/40 p-6 shadow-[0_0_35px_rgba(0,255,136,0.12)] relative overflow-hidden">
+          <div className="flex items-center justify-between mb-3 pb-3 border-b border-slate-800/80">
+            <div>
+              <span className="text-[10px] font-bold font-mono tracking-widest uppercase text-[#00ff88]">
+                VISUAL IDENTITY &amp; NAVIGATION
+              </span>
+              <h3 className="text-lg font-bold text-white tracking-tight">
+                VitalSense Fingerprint Screen
+              </h3>
+            </div>
+            <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-[#00ff88]/15 text-[#00ff88] border border-[#00ff88]/30 font-mono">
+              Biometric Motif
+            </span>
+          </div>
+
+          {/* Central High-Fidelity Neon Green Fingerprint Scanner Graphic */}
+          <div className="my-1 flex justify-center">
+            <FingerprintScannerGraphic
+              isScanning={true}
+              onScanClick={() => setShowWebcamModal(true)}
+              className="w-full max-w-sm"
+            />
+          </div>
+
+          {/* Navigation Action Buttons Directly to Blood Glucose & Blood Pressure Modules */}
+          <div className="mt-4 space-y-2.5">
+            <div className="grid grid-cols-2 gap-2.5">
+              <Link
+                to="/patient/vitalsense/blood-glucose"
+                className="p-3.5 rounded-2xl bg-slate-900/90 border border-teal-500/30 hover:border-teal-400 hover:bg-slate-900 transition-all group flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-teal-400 flex items-center gap-1.5">
+                    <Droplets size={13} /> Blood Glucose
+                  </span>
+                  <ChevronDown size={14} className="text-teal-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </div>
+                <div className="mt-2.5">
+                  <div className="text-sm font-bold text-white">Glucose Tracking</div>
+                  <div className="text-[11px] text-slate-400">ADA trends &amp; log entries</div>
+                </div>
+              </Link>
+
+              <Link
+                to="/patient/vitalsense/blood-pressure"
+                className="p-3.5 rounded-2xl bg-slate-900/90 border border-indigo-500/30 hover:border-indigo-400 hover:bg-slate-900 transition-all group flex flex-col justify-between"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-400 flex items-center gap-1.5">
+                    <Heart size={13} /> Blood Pressure
+                  </span>
+                  <ChevronDown size={14} className="text-indigo-400 -rotate-90 group-hover:translate-x-1 transition-transform" />
+                </div>
+                <div className="mt-2.5">
+                  <div className="text-sm font-bold text-white">BP Monitoring</div>
+                  <div className="text-[11px] text-slate-400">AHA stages &amp; telemetry</div>
+                </div>
+              </Link>
+            </div>
+
+            {/* Non-Fingerprint Clinical Integrity Disclaimer */}
+            <div className="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-[11px] text-slate-400 leading-relaxed flex items-start gap-2">
+              <Info size={14} className="text-[#00ff88] shrink-0 mt-0.5" />
+              <span>
+                <strong>Clinical Integrity Notice:</strong> The fingerprint graphic is a conceptual UI element and does <em>not</em> measure blood glucose or blood pressure. Real diagnostic telemetry is derived strictly from verified manual entries or certified medical devices.
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Card: Health Monitoring Dashboard (Overview with Blood sugar, Heart rate, Blood pressure) */}
+        <div className="lg:col-span-7 flex flex-col">
+          <OverviewDashboardCards
+            data={dashboardSummary}
+            onLogBpClick={() => setShowBpModal(true)}
+            onLogGlucoseClick={() => setShowGlucoseModal(true)}
+            onScanPulseClick={() => setShowWebcamModal(true)}
+          />
+        </div>
+      </div>
+
+      {/* ── 3. Three Clearly Separated Measurement Modes Hub ────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         {/* Mode A: Real Device Data */}
         <div className="rounded-2xl border border-slate-800/80 bg-slate-900/90 p-5 flex flex-col justify-between space-y-3 shadow-lg">
@@ -528,11 +635,26 @@ export default function VitalSense() {
             <button
               onClick={() => setShowWebcamModal(true)}
               className="py-1.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs font-medium cursor-pointer transition-colors flex items-center gap-1"
+              title="Experimental non-diagnostic pulse estimation"
             >
-              <Camera size={13} className="text-teal-400" /> Webcam Pulse Demo
+              <Camera size={13} className="text-teal-400" /> Experimental Camera Pulse Estimation
             </button>
           </div>
         </div>
+      </div>
+
+      {/* ── 3.1 Medical Device Connection Center (Direct Telemetry Hub) ──────── */}
+      <div id="device-connection-center">
+        <DeviceConnectionCenter
+          onReadingImported={() => {
+            fetchVitals()
+            fetchAlerts()
+            fetchDashboardSummary()
+            setRefreshKey((k) => k + 1)
+          }}
+          onOpenManualBp={() => setShowBpModal(true)}
+          onOpenManualGlucose={() => setShowGlucoseModal(true)}
+        />
       </div>
 
       {/* ── 3. Four Rebuilt Key Clinical Metric Cards ───────────────────────── */}

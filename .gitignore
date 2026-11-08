@@ -85,6 +85,8 @@ logs/
 uploads/
 tmp/
 temp/
+scratch/
+.vercel/
 
 # Coverage
 coverage/

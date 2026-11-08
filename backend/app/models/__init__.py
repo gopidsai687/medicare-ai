@@ -2,10 +2,15 @@
 from app.models.user import User, UserRole
 from app.models.patient import Patient, BloodType, Gender
 from app.models.doctor import Doctor
+from app.models.doctor_review import DoctorReview
 from app.models.doctor_schedule import DoctorSchedule, DoctorTimeOff, DayOfWeek
 from app.models.appointment import Appointment, AppointmentStatus, AppointmentType
+from app.models.hospital import Hospital, HospitalContact
+from app.models.external_appointment import ExternalAppointment
 from app.models.medical_record import MedicalRecord, RecordCategory, RecordStatus
-from app.models.prescription import Prescription, PrescriptionStatus
+from app.models.lab_result import LabResult, LabResultAuditLog, LabCategory, LabResultStatus, LabSource
+from app.models.record_version import RecordVersion, MedicalRecordAuditLog
+from app.models.prescription import Prescription, PrescriptionStatus, PrescriptionAuditLog, PrescriptionSource
 from app.models.prescription_analysis import (
     PrescriptionUpload,
     UploadStatus,
@@ -22,6 +27,10 @@ from app.models.medical_report_analysis import (
 )
 from app.models.vital_sign import (
     VitalSign,
+    GlucoseMeasurement,
+    BloodPressureMeasurement,
+    DeviceConnection,
+    DeviceReadingSync,
     MeasurementSource,
     GlucoseContext,
     VitalReminder,
@@ -115,6 +124,13 @@ __all__ = [
     "MedicalRecord",
     "RecordCategory",
     "RecordStatus",
+    "LabResult",
+    "LabResultAuditLog",
+    "LabCategory",
+    "LabResultStatus",
+    "LabSource",
+    "RecordVersion",
+    "MedicalRecordAuditLog",
     "Prescription",
     "PrescriptionStatus",
     "PrescriptionUpload",

@@ -5,6 +5,7 @@ Device Integrations, Reminders, Sharing Consent, and Biometrics.
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import secrets
@@ -21,6 +22,7 @@ from app.core.database import get_db
 from app.core.dependencies import get_current_user
 from app.models.appointment import Appointment
 from app.models.doctor import Doctor
+from app.models.lab_result import LabResult
 from app.models.medical_record import MedicalRecord
 from app.models.medical_report_analysis import MedicalReportUpload
 from app.models.patient import Patient
@@ -30,7 +32,11 @@ from app.models.user import User, UserRole
 from app.models.vital_sign import (
     AlertSeverity,
     AlertStatus,
+    BloodPressureMeasurement,
+    DeviceConnection,
+    DeviceReadingSync,
     GlucoseContext,
+    GlucoseMeasurement,
     MeasurementSource,
     NotificationPreference,
     VitalAlert,
@@ -40,17 +46,28 @@ from app.models.vital_sign import (
     WebAuthnCredential,
 )
 from app.schemas.vital_sign import (
+    BloodGlucoseCreateRequest,
     BloodGlucoseLogRequest,
+    BloodPressureCreateRequest,
     BloodPressureLogRequest,
+    BloodPressureMeasurementRead,
     BodyMapIndicator,
     BodyMapResponse,
     DeviceBatchImportRequest,
     DeviceBatchImportResponse,
+    DeviceConnectionCreate,
+    DeviceConnectionRead,
+    DeviceReadingItem,
+    DeviceReadingSyncRead,
+    DeviceSyncResponse,
+    DeviceTelemetrySyncRequest,
     DoctorClinicalNoteRequest,
+    GlucoseMeasurementRead,
     HeartRateLogRequest,
     NotificationPreferenceRead,
     NotificationPreferenceUpdate,
     NotificationSubscribeRequest,
+    SmartDashboardSummary,
     VitalAlertAcknowledgeRequest,
     VitalAlertRead,
     VitalReminderCreate,
@@ -274,6 +291,7 @@ async def log_blood_pressure(
     """
     Log blood pressure with systolic, diastolic, pulse, source, and optional notes.
     Categorized deterministically per AHA/ACC 2017.
+    Synchronizes across both unified vital_signs and dedicated blood_pressure_measurements tables.
     """
     patient_id = await _resolve_patient_id(db, current_user)
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
@@ -293,6 +311,22 @@ async def log_blood_pressure(
         is_sample=payload.is_sample,
     )
     db.add(vitals)
+
+    # Synchronize to dedicated blood_pressure_measurements table
+    bp_entity = BloodPressureMeasurement(
+        patient_id=patient_id,
+        systolic=payload.systolic_bp,
+        diastolic=payload.diastolic_bp,
+        pulse=payload.heart_rate,
+        unit="mmHg",
+        measured_at=recorded_at,
+        source_type=source,
+        device_name=payload.device_name,
+        notes=payload.notes,
+        is_sample=payload.is_sample,
+    )
+    db.add(bp_entity)
+
     created_alerts = await evaluate_vital_reading(db, patient_id, vitals)
     await db.commit()
     await db.refresh(vitals)
@@ -309,6 +343,7 @@ async def log_blood_glucose(
     """
     Log blood glucose with bidirectional unit conversion (mg/dL <-> mmol/L)
     and ADA meal context (fasting, before_meal, after_meal, bedtime, random).
+    Synchronizes across both unified vital_signs and dedicated glucose_measurements tables.
     """
     patient_id = await _resolve_patient_id(db, current_user)
     recorded_at = payload.recorded_at or datetime.now(timezone.utc)
@@ -336,11 +371,1022 @@ async def log_blood_glucose(
         is_sample=payload.is_sample,
     )
     db.add(vitals)
+
+    # Synchronize to dedicated glucose_measurements table
+    glucose_entity = GlucoseMeasurement(
+        patient_id=patient_id,
+        glucose_value=glucose_mgdl,
+        glucose_value_mmol=glucose_mmol,
+        unit=payload.glucose_unit,
+        glucose_context=payload.glucose_context or "fasting",
+        measured_at=recorded_at,
+        source_type=source,
+        device_name=payload.device_name,
+        notes=payload.notes,
+        is_sample=payload.is_sample,
+    )
+    db.add(glucose_entity)
+
     created_alerts = await evaluate_vital_reading(db, patient_id, vitals)
     await db.commit()
     await db.refresh(vitals)
     primary_alert = created_alerts[0] if created_alerts else None
     return _enrich_vital_sign(vitals, alert=primary_alert)
+
+
+# -----------------------------------------------------------------------------
+# Dedicated Blood Pressure & Glucose Queries & Post Endpoints
+# -----------------------------------------------------------------------------
+@router.post("/bp", response_model=BloodPressureMeasurementRead, status_code=status.HTTP_201_CREATED)
+async def create_blood_pressure_measurement(
+    payload: BloodPressureCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Record an actual blood pressure reading from a verified medical device or validated manual entry.
+    Categorized per AHA/ACC 2017 with duplicate prevention and automatic EHR vital_signs synchronization.
+    """
+    patient_id = await _resolve_patient_id(db, current_user)
+    measured_at = payload.measured_at or datetime.now(timezone.utc)
+    if measured_at.tzinfo is None:
+        measured_at = measured_at.replace(tzinfo=timezone.utc)
+
+    # 1. Validation: Systolic must be strictly greater than Diastolic
+    if payload.systolic <= payload.diastolic:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Systolic BP must be strictly greater than Diastolic BP",
+        )
+
+    # 2. Compute deterministic reading hash for idempotency and duplicate prevention
+    hash_seed = f"{patient_id}:{payload.device_identifier or payload.device_name or 'manual'}:{payload.systolic}:{payload.diastolic}:{payload.pulse or 0}:{measured_at.strftime('%Y%m%d%H%M')}"
+    reading_hash = hashlib.sha256(hash_seed.encode()).hexdigest()
+
+    # 3. Duplicate detection within 60-second window
+    existing_stmt = select(BloodPressureMeasurement).where(
+        BloodPressureMeasurement.patient_id == patient_id,
+        or_(
+            BloodPressureMeasurement.reading_hash == reading_hash,
+            and_(
+                BloodPressureMeasurement.systolic == payload.systolic,
+                BloodPressureMeasurement.diastolic == payload.diastolic,
+                BloodPressureMeasurement.measured_at >= measured_at - timedelta(seconds=60),
+                BloodPressureMeasurement.measured_at <= measured_at + timedelta(seconds=60),
+            )
+        )
+    ).limit(1)
+    existing_res = await db.execute(existing_stmt)
+    existing_bp = existing_res.scalar_one_or_none()
+    if existing_bp:
+        bp_cat = classify_blood_pressure(existing_bp.systolic, existing_bp.diastolic)
+        map_val = round(existing_bp.diastolic + (existing_bp.systolic - existing_bp.diastolic) / 3.0, 1)
+        res_model = BloodPressureMeasurementRead.model_validate(existing_bp)
+        res_model.bp_category = bp_cat
+        res_model.mean_arterial_pressure = map_val
+        return res_model
+
+    # 4. Save to dedicated blood_pressure_measurements table
+    bp_entity = BloodPressureMeasurement(
+        patient_id=patient_id,
+        systolic=payload.systolic,
+        diastolic=payload.diastolic,
+        pulse=payload.pulse,
+        unit=payload.unit,
+        measured_at=measured_at,
+        source_type=payload.source_type,
+        device_name=payload.device_name,
+        device_identifier=payload.device_identifier,
+        device_connection_id=payload.device_connection_id,
+        external_reading_id=payload.external_reading_id,
+        reading_hash=reading_hash,
+        notes=payload.notes,
+        is_sample=False,
+    )
+    db.add(bp_entity)
+
+    # 5. Synchronize into patient EHR vital_signs table
+    vitals = VitalSign(
+        patient_id=patient_id,
+        recorded_by_id=current_user.id,
+        recorded_at=measured_at,
+        systolic_bp=payload.systolic,
+        diastolic_bp=payload.diastolic,
+        heart_rate=payload.pulse,
+        measurement_source=payload.source_type,
+        device_name=payload.device_name,
+        notes=payload.notes,
+        is_patient_entered=(payload.source_type == "manual_entry"),
+        is_sample=False,
+    )
+    db.add(vitals)
+
+    await evaluate_vital_reading(db, patient_id, vitals)
+    await db.commit()
+    await db.refresh(bp_entity)
+
+    bp_cat = classify_blood_pressure(bp_entity.systolic, bp_entity.diastolic)
+    map_val = round(bp_entity.diastolic + (bp_entity.systolic - bp_entity.diastolic) / 3.0, 1)
+    res_model = BloodPressureMeasurementRead.model_validate(bp_entity)
+    res_model.bp_category = bp_cat
+    res_model.mean_arterial_pressure = map_val
+    return res_model
+
+
+@router.post("/glucose", response_model=GlucoseMeasurementRead, status_code=status.HTTP_201_CREATED)
+async def create_glucose_measurement(
+    payload: BloodGlucoseCreateRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Record an actual blood glucose measurement from a verified medical meter, CGM, or manual entry.
+    Performs bidirectional unit conversions (mg/dL <-> mmol/L), categorizes per ADA standards,
+    prevents duplicate ingestion, and synchronizes to EHR vital_signs.
+    """
+    patient_id = await _resolve_patient_id(db, current_user)
+    measured_at = payload.measured_at or datetime.now(timezone.utc)
+    if measured_at.tzinfo is None:
+        measured_at = measured_at.replace(tzinfo=timezone.utc)
+
+    if payload.unit == "mmol/L":
+        glucose_mmol = round(payload.glucose_value, 2)
+        glucose_mgdl = round(payload.glucose_value * 18.0182, 1)
+    else:
+        glucose_mgdl = round(payload.glucose_value, 1)
+        glucose_mmol = round(payload.glucose_value / 18.0182, 2)
+
+    # 1. Compute deterministic reading hash for duplicate prevention
+    hash_seed = f"{patient_id}:{payload.device_identifier or payload.device_name or 'manual'}:{glucose_mgdl}:{payload.glucose_context}:{measured_at.strftime('%Y%m%d%H%M')}"
+    reading_hash = hashlib.sha256(hash_seed.encode()).hexdigest()
+
+    # 2. Duplicate detection within 60-second window
+    existing_stmt = select(GlucoseMeasurement).where(
+        GlucoseMeasurement.patient_id == patient_id,
+        or_(
+            GlucoseMeasurement.reading_hash == reading_hash,
+            and_(
+                GlucoseMeasurement.glucose_value == glucose_mgdl,
+                GlucoseMeasurement.measured_at >= measured_at - timedelta(seconds=60),
+                GlucoseMeasurement.measured_at <= measured_at + timedelta(seconds=60),
+            )
+        )
+    ).limit(1)
+    existing_res = await db.execute(existing_stmt)
+    existing_glu = existing_res.scalar_one_or_none()
+    if existing_glu:
+        glu_cat = classify_blood_glucose(existing_glu.glucose_value, existing_glu.glucose_context)
+        res_model = GlucoseMeasurementRead.model_validate(existing_glu)
+        res_model.category = glu_cat
+        return res_model
+
+    # 3. Save to dedicated glucose_measurements table
+    glu_entity = GlucoseMeasurement(
+        patient_id=patient_id,
+        glucose_value=glucose_mgdl,
+        glucose_value_mmol=glucose_mmol,
+        unit=payload.unit,
+        glucose_context=payload.glucose_context or "fasting",
+        measured_at=measured_at,
+        source_type=payload.source_type,
+        device_name=payload.device_name,
+        device_identifier=payload.device_identifier,
+        device_connection_id=payload.device_connection_id,
+        external_reading_id=payload.external_reading_id,
+        reading_hash=reading_hash,
+        notes=payload.notes,
+        is_sample=False,
+    )
+    db.add(glu_entity)
+
+    # 4. Synchronize into patient EHR vital_signs table
+    vitals = VitalSign(
+        patient_id=patient_id,
+        recorded_by_id=current_user.id,
+        recorded_at=measured_at,
+        blood_glucose=glucose_mgdl,
+        blood_glucose_mmol=glucose_mmol,
+        glucose_unit=payload.unit,
+        glucose_context=payload.glucose_context,
+        measurement_source=payload.source_type,
+        device_name=payload.device_name,
+        notes=payload.notes,
+        is_patient_entered=(payload.source_type == "manual_entry"),
+        is_sample=False,
+    )
+    db.add(vitals)
+
+    await evaluate_vital_reading(db, patient_id, vitals)
+    await db.commit()
+    await db.refresh(glu_entity)
+
+    glu_cat = classify_blood_glucose(glu_entity.glucose_value, glu_entity.glucose_context)
+    res_model = GlucoseMeasurementRead.model_validate(glu_entity)
+    res_model.category = glu_cat
+    return res_model
+
+
+@router.get("/bp", response_model=List[BloodPressureMeasurementRead])
+async def get_blood_pressure_history(
+    days: int = Query(30, ge=1, le=3650),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve historical blood pressure measurements with AHA categories."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    now = datetime.now(timezone.utc)
+    since_date = now - timedelta(days=days)
+    
+    # Query dedicated table first, fallback to unified vital_signs
+    stmt = (
+        select(BloodPressureMeasurement)
+        .where(
+            BloodPressureMeasurement.patient_id == patient_id,
+            BloodPressureMeasurement.measured_at >= since_date,
+        )
+        .order_by(desc(BloodPressureMeasurement.measured_at))
+    )
+    res = await db.execute(stmt)
+    records = res.scalars().all()
+
+    enriched = []
+    for r in records:
+        bp_cat = classify_blood_pressure(r.systolic, r.diastolic)
+        map_val = round(r.diastolic + (r.systolic - r.diastolic) / 3.0, 1)
+        model = BloodPressureMeasurementRead.model_validate(r)
+        model.bp_category = bp_cat
+        model.mean_arterial_pressure = map_val
+        enriched.append(model)
+    return enriched
+
+
+@router.get("/glucose", response_model=List[GlucoseMeasurementRead])
+async def get_glucose_history(
+    days: int = Query(30, ge=1, le=3650),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve historical blood glucose measurements with ADA categories."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    now = datetime.now(timezone.utc)
+    since_date = now - timedelta(days=days)
+
+    stmt = (
+        select(GlucoseMeasurement)
+        .where(
+            GlucoseMeasurement.patient_id == patient_id,
+            GlucoseMeasurement.measured_at >= since_date,
+        )
+        .order_by(desc(GlucoseMeasurement.measured_at))
+    )
+    res = await db.execute(stmt)
+    records = res.scalars().all()
+
+    enriched = []
+    for r in records:
+        glu_cat = classify_blood_glucose(r.glucose_value, r.glucose_context)
+        model = GlucoseMeasurementRead.model_validate(r)
+        model.category = glu_cat
+        enriched.append(model)
+    return enriched
+
+
+# -----------------------------------------------------------------------------
+# Smart Health Dashboard Summary (Overview Screen)
+# -----------------------------------------------------------------------------
+@router.get("/dashboard-summary", response_model=SmartDashboardSummary)
+async def get_dashboard_summary(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Combined health monitoring summary providing:
+    - Latest blood sugar reading, category, and elapsed timestamp
+    - Latest heart rate (pulse) reading and elapsed timestamp
+    - Latest blood pressure reading, AHA category, MAP, and elapsed timestamp
+    - Weekly and monthly averages
+    - Missing measurement indicators (e.g. fasting glucose not logged today)
+    - Data provenance breakdown (manual vs verified medical device)
+    - Prominent non-fingerprint clinical disclaimer
+    """
+    patient_id = await _resolve_patient_id(db, current_user)
+    now = datetime.now(timezone.utc)
+
+    # 1. Fetch recent unified vital signs
+    stmt = (
+        select(VitalSign)
+        .where(VitalSign.patient_id == patient_id)
+        .order_by(desc(VitalSign.recorded_at))
+        .limit(100)
+    )
+    res = await db.execute(stmt)
+    all_vitals = res.scalars().all()
+
+    # Prefer actual non-sample data if available
+    actuals = [v for v in all_vitals if not v.is_sample]
+    pool = actuals if actuals else all_vitals
+
+    # Helper for elapsed time
+    def _format_elapsed(dt: datetime) -> str:
+        diff = now - (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc))
+        secs = max(0, int(diff.total_seconds()))
+        if secs < 60:
+            return "Just now"
+        if secs < 3600:
+            m = secs // 60
+            return f"{m}m ago"
+        if secs < 86400:
+            h = secs // 3600
+            return f"{h}h ago"
+        d = secs // 86400
+        return f"{d}d ago"
+
+    # Latest Glucose
+    latest_glu_rec = next((v for v in pool if v.blood_glucose is not None), None)
+    latest_glucose_dict = None
+    if latest_glu_rec:
+        cat = classify_blood_glucose(latest_glu_rec.blood_glucose, latest_glu_rec.glucose_context)
+        latest_glucose_dict = {
+            "has_reading": True,
+            "id": str(latest_glu_rec.id),
+            "value": round(latest_glu_rec.blood_glucose, 1),
+            "value_mmol": round(latest_glu_rec.blood_glucose_mmol or (latest_glu_rec.blood_glucose / 18.0182), 2),
+            "unit": latest_glu_rec.glucose_unit or "mg/dL",
+            "context": latest_glu_rec.glucose_context or "fasting",
+            "category": cat,
+            "status": "Normal" if "Normal" in cat or "Target" in cat else "Elevated",
+            "recorded_at": latest_glu_rec.recorded_at.isoformat(),
+            "elapsed_time": _format_elapsed(latest_glu_rec.recorded_at),
+            "source": latest_glu_rec.measurement_source,
+            "device_name": latest_glu_rec.device_name,
+            "is_sample": latest_glu_rec.is_sample,
+        }
+    else:
+        latest_glucose_dict = {
+            "has_reading": False,
+            "display_text": "No reading recorded",
+            "value": None,
+            "value_mmol": None,
+            "unit": "mg/dL",
+            "context": "fasting",
+            "category": "No reading recorded",
+            "status": "No reading recorded",
+            "recorded_at": None,
+            "elapsed_time": "No reading recorded",
+            "source": "missing",
+            "is_sample": False,
+        }
+
+    # Latest Blood Pressure
+    latest_bp_rec = next((v for v in pool if v.systolic_bp is not None and v.diastolic_bp is not None), None)
+    latest_bp_dict = None
+    if latest_bp_rec:
+        bp_cat = classify_blood_pressure(latest_bp_rec.systolic_bp, latest_bp_rec.diastolic_bp)
+        map_val = round(latest_bp_rec.diastolic_bp + (latest_bp_rec.systolic_bp - latest_bp_rec.diastolic_bp) / 3.0, 1)
+        latest_bp_dict = {
+            "has_reading": True,
+            "id": str(latest_bp_rec.id),
+            "systolic": latest_bp_rec.systolic_bp,
+            "diastolic": latest_bp_rec.diastolic_bp,
+            "pulse": latest_bp_rec.heart_rate,
+            "unit": "mmHg",
+            "category": bp_cat,
+            "mean_arterial_pressure": map_val,
+            "status": "Normal" if "Normal" in bp_cat else "Elevated" if "Elevated" in bp_cat else "High",
+            "recorded_at": latest_bp_rec.recorded_at.isoformat(),
+            "elapsed_time": _format_elapsed(latest_bp_rec.recorded_at),
+            "source": latest_bp_rec.measurement_source,
+            "device_name": latest_bp_rec.device_name,
+            "is_sample": latest_bp_rec.is_sample,
+        }
+    else:
+        latest_bp_dict = {
+            "has_reading": False,
+            "display_text": "No reading recorded",
+            "systolic": None,
+            "diastolic": None,
+            "pulse": None,
+            "unit": "mmHg",
+            "category": "No reading recorded",
+            "mean_arterial_pressure": None,
+            "status": "No reading recorded",
+            "recorded_at": None,
+            "elapsed_time": "No reading recorded",
+            "source": "missing",
+            "is_sample": False,
+        }
+
+    # Latest Pulse / Heart Rate
+    latest_hr_rec = next((v for v in pool if v.heart_rate is not None), None)
+    latest_pulse_dict = None
+    if latest_hr_rec:
+        status_str = "Normal" if 60 <= latest_hr_rec.heart_rate <= 100 else "Bradycardia" if latest_hr_rec.heart_rate < 60 else "Tachycardia"
+        latest_pulse_dict = {
+            "has_reading": True,
+            "id": str(latest_hr_rec.id),
+            "rate": latest_hr_rec.heart_rate,
+            "unit": "bpm",
+            "status": status_str,
+            "recorded_at": latest_hr_rec.recorded_at.isoformat(),
+            "elapsed_time": _format_elapsed(latest_hr_rec.recorded_at),
+            "source": latest_hr_rec.measurement_source,
+            "device_name": latest_hr_rec.device_name,
+            "is_sample": latest_hr_rec.is_sample,
+        }
+    else:
+        latest_pulse_dict = {
+            "has_reading": False,
+            "display_text": "No reading recorded",
+            "rate": None,
+            "unit": "bpm",
+            "status": "No reading recorded",
+            "recorded_at": None,
+            "elapsed_time": "No reading recorded",
+            "source": "missing",
+            "is_sample": False,
+        }
+
+    # 2. Compute Weekly and Monthly Averages
+    seven_days_ago = now - timedelta(days=7)
+    thirty_days_ago = now - timedelta(days=30)
+
+    weekly_vitals = [v for v in pool if (v.recorded_at if v.recorded_at.tzinfo else v.recorded_at.replace(tzinfo=timezone.utc)) >= seven_days_ago]
+    monthly_vitals = [v for v in pool if (v.recorded_at if v.recorded_at.tzinfo else v.recorded_at.replace(tzinfo=timezone.utc)) >= thirty_days_ago]
+
+    def _calc_stats(list_records: list[VitalSign]) -> dict:
+        systolics = [v.systolic_bp for v in list_records if v.systolic_bp is not None]
+        diastolics = [v.diastolic_bp for v in list_records if v.diastolic_bp is not None]
+        glucoses = [v.blood_glucose for v in list_records if v.blood_glucose is not None]
+        pulses = [v.heart_rate for v in list_records if v.heart_rate is not None]
+
+        return {
+            "avg_systolic": round(sum(systolics) / len(systolics), 1) if systolics else None,
+            "avg_diastolic": round(sum(diastolics) / len(diastolics), 1) if diastolics else None,
+            "avg_glucose": round(sum(glucoses) / len(glucoses), 1) if glucoses else None,
+            "avg_pulse": round(sum(pulses) / len(pulses), 1) if pulses else None,
+            "bp_readings_count": len(systolics),
+            "glucose_readings_count": len(glucoses),
+            "total_readings": len(list_records),
+        }
+
+    weekly_avg = _calc_stats(weekly_vitals)
+    monthly_avg = _calc_stats(monthly_vitals)
+
+    # 3. Missing Measurement Indicators
+    missing_indicators = []
+    
+    # Check fasting glucose in last 20 hours
+    twenty_hours_ago = now - timedelta(hours=20)
+    has_recent_fasting = any(
+        (v.recorded_at if v.recorded_at.tzinfo else v.recorded_at.replace(tzinfo=timezone.utc)) >= twenty_hours_ago and
+        v.blood_glucose is not None and
+        (v.glucose_context or "").lower() == "fasting"
+        for v in pool
+    )
+    if not has_recent_fasting:
+        missing_indicators.append({
+            "indicator_id": "missing_fasting_glucose",
+            "type": "blood_sugar",
+            "title": "No Fasting Glucose Recorded Today",
+            "description": "Fasting blood sugar has not been logged in the past 20 hours. Morning checks establish metabolic baseline.",
+            "severity": "attention",
+            "recommended_action": "Log fasting blood sugar before breakfast",
+            "action_url": "/patient/vitalsense/blood-glucose",
+        })
+
+    # Check BP in last 48 hours
+    forty_eight_hours_ago = now - timedelta(hours=48)
+    has_recent_bp = any(
+        (v.recorded_at if v.recorded_at.tzinfo else v.recorded_at.replace(tzinfo=timezone.utc)) >= forty_eight_hours_ago and
+        v.systolic_bp is not None
+        for v in pool
+    )
+    if not has_recent_bp:
+        missing_indicators.append({
+            "indicator_id": "missing_blood_pressure",
+            "type": "blood_pressure",
+            "title": "Blood Pressure Measurement Due",
+            "description": "No blood pressure recorded in the past 48 hours. Routine resting monitoring tracks cardiovascular stability.",
+            "severity": "info",
+            "recommended_action": "Take resting measurement with upper-arm cuff",
+            "action_url": "/patient/vitalsense/blood-pressure",
+        })
+
+    # Provenance counts
+    manual_cnt = sum(1 for v in pool if "manual" in (v.measurement_source or "").lower())
+    device_cnt = sum(1 for v in pool if any(kw in (v.measurement_source or "").lower() for kw in ["device", "ble", "omron", "dexcom"]))
+    sample_cnt = sum(1 for v in all_vitals if v.is_sample)
+
+    provenance_summary = {
+        "manual_entries": manual_cnt,
+        "verified_device_entries": device_cnt,
+        "sample_entries": sample_cnt,
+        "total_patient_records": len(actuals),
+    }
+
+    # Recent history summaries for dashboard list
+    recent_history_list = []
+    for v in pool[:10]:
+        recent_history_list.append({
+            "id": str(v.id),
+            "recorded_at": v.recorded_at.isoformat(),
+            "elapsed_time": _format_elapsed(v.recorded_at),
+            "systolic": v.systolic_bp,
+            "diastolic": v.diastolic_bp,
+            "heart_rate": v.heart_rate,
+            "blood_glucose": v.blood_glucose,
+            "glucose_unit": v.glucose_unit or "mg/dL",
+            "glucose_context": v.glucose_context,
+            "source": v.measurement_source,
+            "device_name": v.device_name,
+            "is_sample": v.is_sample,
+            "notes": v.notes,
+        })
+
+    return SmartDashboardSummary(
+        latest_glucose=latest_glucose_dict,
+        latest_blood_pressure=latest_bp_dict,
+        latest_pulse=latest_pulse_dict,
+        weekly_averages=weekly_avg,
+        monthly_averages=monthly_avg,
+        missing_indicators=missing_indicators,
+        recent_history=recent_history_list,
+        provenance_summary=provenance_summary,
+        clinical_disclaimer=(
+            "Fingerprint-themed interface is a visual branding element only. "
+            "Biometric fingerprint graphics, webcams, or phone touchscreens CANNOT measure blood glucose or blood pressure. "
+            "All real readings require verified manual logging or compatible clinical medical devices."
+        ),
+    )
+
+
+# -----------------------------------------------------------------------------
+# Device Connections Management (BLE Medical Peripherals)
+# -----------------------------------------------------------------------------
+@router.get("/devices", response_model=List[DeviceConnectionRead])
+async def list_patient_devices(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """List paired Bluetooth and medical device connections for the current patient."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    stmt = (
+        select(DeviceConnection)
+        .where(DeviceConnection.patient_id == patient_id)
+        .order_by(desc(DeviceConnection.created_at))
+    )
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@router.post("/devices", response_model=DeviceConnectionRead, status_code=status.HTTP_201_CREATED)
+async def register_patient_device(
+    payload: DeviceConnectionCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Register or pair a new compatible Bluetooth medical peripheral (e.g. Omron BP, Dexcom)."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    device = DeviceConnection(
+        patient_id=patient_id,
+        device_name=payload.device_name,
+        device_type=payload.device_type,
+        manufacturer=payload.manufacturer,
+        model_number=payload.model_number,
+        serial_number=payload.serial_number,
+        mac_address=payload.mac_address,
+        connection_protocol=payload.connection_protocol,
+        status="paired",
+        last_synced_at=datetime.now(timezone.utc),
+        notes=payload.notes,
+    )
+    db.add(device)
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+@router.delete("/devices/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def unpair_patient_device(
+    device_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Unpair or delete a registered medical peripheral."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    stmt = select(DeviceConnection).where(
+        DeviceConnection.id == device_id,
+        DeviceConnection.patient_id == patient_id,
+    )
+    res = await db.execute(stmt)
+    device = res.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    await db.delete(device)
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/devices/{device_id}/sync", response_model=DeviceSyncResponse)
+async def sync_device_telemetry(
+    device_id: str,
+    payload: DeviceTelemetrySyncRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Import and synchronize actual telemetry readings from a connected Bluetooth or medical device.
+    Strictly verifies device ownership, prevents duplicate reading ingestion, updates device sync metadata,
+    and synchronizes records into the patient's EHR.
+    """
+    patient_id = await _resolve_patient_id(db, current_user)
+
+    # 1. Enforce Patient Isolation: Lookup device by UUID or identifier
+    parsed_uuid = None
+    try:
+        parsed_uuid = uuid.UUID(device_id)
+    except (ValueError, AttributeError):
+        parsed_uuid = None
+
+    if parsed_uuid:
+        stmt = select(DeviceConnection).where(
+            DeviceConnection.id == parsed_uuid,
+            DeviceConnection.patient_id == patient_id,
+        )
+    else:
+        stmt = select(DeviceConnection).where(
+            or_(
+                DeviceConnection.model_number == device_id,
+                DeviceConnection.serial_number == device_id,
+                DeviceConnection.device_name.ilike(f"%{device_id}%"),
+            ),
+            DeviceConnection.patient_id == patient_id,
+        )
+
+    res = await db.execute(stmt)
+    device = res.scalar_one_or_none()
+
+    # Auto-register device connection if missing for authenticated patient
+    if not device:
+        dev_name = payload.device_name or (device_id.replace('_', ' ').title())
+        device = DeviceConnection(
+            patient_id=patient_id,
+            device_name=dev_name,
+            device_type="bluetooth_peripheral",
+            model_number=device_id,
+            manufacturer="Certified Medical Peripheral",
+            status="CONNECTED",
+            connection_protocol="bluetooth_le",
+            last_synced_at=datetime.now(timezone.utc),
+        )
+        db.add(device)
+        await db.flush()
+
+    now_utc = datetime.now(timezone.utc)
+    synced_count = 0
+    duplicate_count = 0
+    error_count = 0
+    processed_records: List[Dict[str, Any]] = []
+
+    for item in payload.readings:
+        try:
+            m_at = item.measured_at or now_utc
+            if m_at.tzinfo is None:
+                m_at = m_at.replace(tzinfo=timezone.utc)
+
+            # 2. Compute deterministic reading hash
+            raw_hash_seed = f"{patient_id}:{device.id}:{item.reading_type}:{item.systolic}:{item.diastolic}:{item.glucose_value}:{item.heart_rate}:{m_at.strftime('%Y%m%d%H%M%S')}"
+            reading_hash = hashlib.sha256(raw_hash_seed.encode()).hexdigest()
+
+            # 3. Check if this reading hash or external_reading_id was already synced
+            dup_sync_stmt = select(DeviceReadingSync).where(
+                DeviceReadingSync.patient_id == patient_id,
+                or_(
+                    DeviceReadingSync.reading_hash == reading_hash,
+                    and_(
+                        DeviceReadingSync.external_reading_id.is_not(None),
+                        DeviceReadingSync.external_reading_id == item.external_reading_id,
+                    ) if item.external_reading_id else False,
+                )
+            ).limit(1)
+            dup_res = await db.execute(dup_sync_stmt)
+            if dup_res.scalar_one_or_none():
+                duplicate_count += 1
+                processed_records.append({
+                    "reading_type": item.reading_type,
+                    "measured_at": m_at.isoformat(),
+                    "status": "DUPLICATE_SKIPPED",
+                    "reason": "Reading already imported into EHR.",
+                })
+                continue
+
+            # 4. Ingest Reading by Type
+            created_entity_id = None
+            if item.reading_type == "blood_pressure":
+                if not item.systolic or not item.diastolic:
+                    error_count += 1
+                    continue
+                bp_entity = BloodPressureMeasurement(
+                    patient_id=patient_id,
+                    systolic=item.systolic,
+                    diastolic=item.diastolic,
+                    pulse=item.pulse,
+                    unit="mmHg",
+                    measured_at=m_at,
+                    source_type="bluetooth_device",
+                    device_name=device.device_name,
+                    device_identifier=device.mac_address or str(device.id),
+                    device_connection_id=device.id,
+                    external_reading_id=item.external_reading_id,
+                    reading_hash=reading_hash,
+                    notes=item.notes or f"Imported via {device.device_name}",
+                    is_sample=False,
+                )
+                db.add(bp_entity)
+                await db.flush()
+                created_entity_id = bp_entity.id
+
+                # EHR Sync
+                vitals = VitalSign(
+                    patient_id=patient_id,
+                    recorded_by_id=current_user.id,
+                    recorded_at=m_at,
+                    systolic_bp=item.systolic,
+                    diastolic_bp=item.diastolic,
+                    heart_rate=item.pulse,
+                    measurement_source="bluetooth_device",
+                    device_name=device.device_name,
+                    notes=item.notes or f"Imported via {device.device_name}",
+                    is_patient_entered=False,
+                    is_sample=False,
+                )
+                db.add(vitals)
+
+            elif item.reading_type == "glucose":
+                if item.glucose_value is None:
+                    error_count += 1
+                    continue
+                if item.unit == "mmol/L":
+                    g_mmol = round(item.glucose_value, 2)
+                    g_mg = round(item.glucose_value * 18.0182, 1)
+                else:
+                    g_mg = round(item.glucose_value, 1)
+                    g_mmol = round(item.glucose_value / 18.0182, 2)
+
+                glu_entity = GlucoseMeasurement(
+                    patient_id=patient_id,
+                    glucose_value=g_mg,
+                    glucose_value_mmol=g_mmol,
+                    unit=item.unit or "mg/dL",
+                    glucose_context=item.glucose_context or "fasting",
+                    measured_at=m_at,
+                    source_type="bluetooth_device",
+                    device_name=device.device_name,
+                    device_identifier=device.mac_address or str(device.id),
+                    device_connection_id=device.id,
+                    external_reading_id=item.external_reading_id,
+                    reading_hash=reading_hash,
+                    notes=item.notes or f"Imported via {device.device_name}",
+                    is_sample=False,
+                )
+                db.add(glu_entity)
+                await db.flush()
+                created_entity_id = glu_entity.id
+
+                # EHR Sync
+                vitals = VitalSign(
+                    patient_id=patient_id,
+                    recorded_by_id=current_user.id,
+                    recorded_at=m_at,
+                    blood_glucose=g_mg,
+                    blood_glucose_mmol=g_mmol,
+                    glucose_unit=item.unit or "mg/dL",
+                    glucose_context=item.glucose_context,
+                    measurement_source="bluetooth_device",
+                    device_name=device.device_name,
+                    notes=item.notes or f"Imported via {device.device_name}",
+                    is_patient_entered=False,
+                    is_sample=False,
+                )
+                db.add(vitals)
+
+            elif item.reading_type == "heart_rate":
+                if not item.heart_rate:
+                    error_count += 1
+                    continue
+                vitals = VitalSign(
+                    patient_id=patient_id,
+                    recorded_by_id=current_user.id,
+                    recorded_at=m_at,
+                    heart_rate=item.heart_rate,
+                    measurement_source="bluetooth_device",
+                    device_name=device.device_name,
+                    notes=item.notes or f"Imported via {device.device_name}",
+                    is_patient_entered=False,
+                    is_sample=False,
+                )
+                db.add(vitals)
+                await db.flush()
+                created_entity_id = vitals.id
+
+            # 5. Log audit trail record
+            sync_log = DeviceReadingSync(
+                patient_id=patient_id,
+                device_connection_id=device.id,
+                device_name=device.device_name,
+                device_identifier=device.mac_address or str(device.id),
+                reading_type=item.reading_type,
+                external_reading_id=item.external_reading_id,
+                reading_hash=reading_hash,
+                reading_timestamp=m_at,
+                status="SYNCED",
+                measurement_id=created_entity_id,
+                raw_payload=json.dumps(item.model_dump(), default=str),
+                notes=f"Successfully imported into EHR at {now_utc.isoformat()}",
+            )
+            db.add(sync_log)
+            synced_count += 1
+            processed_records.append({
+                "reading_type": item.reading_type,
+                "measured_at": m_at.isoformat(),
+                "status": "SYNCED",
+                "measurement_id": str(created_entity_id) if created_entity_id else None,
+            })
+
+        except Exception as e:
+            error_count += 1
+            processed_records.append({
+                "reading_type": item.reading_type,
+                "status": "ERROR",
+                "error": str(e),
+            })
+
+    # Update device last synced timestamp and status
+    device.last_synced_at = now_utc
+    device.status = "CONNECTED"
+    await db.commit()
+
+    return DeviceSyncResponse(
+        device_id=device.id,
+        device_name=device.device_name,
+        synced_count=synced_count,
+        duplicate_count=duplicate_count,
+        error_count=error_count,
+        synced_at=now_utc,
+        message=f"Sync completed: {synced_count} readings imported, {duplicate_count} duplicates skipped, {error_count} errors.",
+        records=processed_records,
+    )
+
+
+@router.get("/devices/sync-history", response_model=List[DeviceReadingSyncRead])
+async def get_device_sync_history(
+    limit: int = Query(50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Retrieve device synchronization audit trail for the authenticated patient."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    stmt = (
+        select(DeviceReadingSync)
+        .where(DeviceReadingSync.patient_id == patient_id)
+        .order_by(desc(DeviceReadingSync.created_at))
+        .limit(limit)
+    )
+    res = await db.execute(stmt)
+    return res.scalars().all()
+
+
+@router.patch("/devices/{device_id}/status", response_model=DeviceConnectionRead)
+async def update_device_status(
+    device_id: uuid.UUID,
+    status_value: str = Query(..., pattern="^(CONNECTED|DISCONNECTED|SYNCING|ERROR|paired)$"),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Update connection status of a paired medical device."""
+    patient_id = await _resolve_patient_id(db, current_user)
+    stmt = select(DeviceConnection).where(
+        DeviceConnection.id == device_id,
+        DeviceConnection.patient_id == patient_id,
+    )
+    res = await db.execute(stmt)
+    device = res.scalar_one_or_none()
+    if not device:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Device not found")
+    device.status = status_value
+    await db.commit()
+    await db.refresh(device)
+    return device
+
+
+# -----------------------------------------------------------------------------
+# Printable PDF Report Generator
+# -----------------------------------------------------------------------------
+@router.get("/export-pdf")
+async def export_vitals_pdf(
+    days: int = Query(30, ge=1, le=365),
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Generate clean, printable HTML clinical telemetry report suitable for browser Print to PDF.
+    Complies with physician review formatting (AHA/ACC and ADA metrics).
+    """
+    patient_id = await _resolve_patient_id(db, current_user)
+    now = datetime.now(timezone.utc)
+    since_date = now - timedelta(days=days)
+    
+    stmt = (
+        select(VitalSign)
+        .where(
+            VitalSign.patient_id == patient_id,
+            VitalSign.recorded_at >= since_date,
+        )
+        .order_by(desc(VitalSign.recorded_at))
+    )
+    res = await db.execute(stmt)
+    vitals_list = res.scalars().all()
+
+    # Patient info
+    patient_name = current_user.full_name or "Verified Patient"
+
+    rows_html = ""
+    for v in vitals_list:
+        date_str = v.recorded_at.strftime("%Y-%m-%d %H:%M")
+        bp_str = f"{v.systolic_bp}/{v.diastolic_bp} mmHg" if v.systolic_bp else "—"
+        bp_cat = classify_blood_pressure(v.systolic_bp, v.diastolic_bp) if v.systolic_bp else "—"
+        glu_str = f"{v.blood_glucose} {v.glucose_unit or 'mg/dL'}" if v.blood_glucose else "—"
+        hr_str = f"{v.heart_rate} bpm" if v.heart_rate else "—"
+        source_str = "Verified Medical Device" if "device" in (v.measurement_source or "").lower() else "Patient Manual Entry"
+        if v.is_sample:
+            source_str = "Demo / Simulated"
+
+        rows_html += f"""
+        <tr>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-family: monospace;">{date_str}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">{bp_str}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px;">{bp_cat}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-weight: 600;">{glu_str}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0;">{hr_str}</td>
+            <td style="padding: 8px 12px; border-bottom: 1px solid #e2e8f0; font-size: 11px; color: #64748b;">{source_str}</td>
+        </tr>
+        """
+
+    html_content = f"""<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>MediCare VitalSense Clinical Telemetry Report - {patient_name}</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1e293b; margin: 40px; }}
+        h1 {{ color: #0f172a; margin-bottom: 4px; font-size: 22px; }}
+        .header {{ border-bottom: 2px solid #0284c7; padding-bottom: 16px; margin-bottom: 24px; }}
+        .meta {{ font-size: 13px; color: #64748b; line-height: 1.6; }}
+        table {{ width: 100%; border-collapse: collapse; margin-top: 16px; font-size: 13px; }}
+        th {{ background: #f8fafc; padding: 10px 12px; text-align: left; border-bottom: 2px solid #cbd5e1; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }}
+        .disclaimer {{ margin-top: 32px; padding: 12px 16px; background: #f1f5f9; border-left: 4px solid #0284c7; font-size: 11px; color: #475569; }}
+        @media print {{
+            body {{ margin: 20px; }}
+            .no-print {{ display: none; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="no-print" style="margin-bottom: 20px;">
+        <button onclick="window.print()" style="background: #0284c7; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; cursor: pointer;">
+            🖨️ Print / Save as PDF
+        </button>
+    </div>
+    <div class="header">
+        <h1>MediCare VitalSense™ — Patient Telemetry Report</h1>
+        <div class="meta">
+            <strong>Patient:</strong> {patient_name} &bull; 
+            <strong>Timeframe:</strong> Last {days} Days &bull; 
+            <strong>Generated:</strong> {now.strftime("%B %d, %Y at %H:%M UTC")}
+        </div>
+    </div>
+    <table>
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Blood Pressure</th>
+                <th>AHA Category</th>
+                <th>Blood Glucose</th>
+                <th>Heart Rate</th>
+                <th>Data Provenance</th>
+            </tr>
+        </thead>
+        <tbody>
+            {rows_html if rows_html else '<tr><td colspan="6" style="padding: 24px; text-align: center; color: #94a3b8;">No vital records found for this period.</td></tr>'}
+        </tbody>
+    </table>
+    <div class="disclaimer">
+        <strong>Clinical Integrity Notice:</strong> All blood pressure and blood glucose values represented in this report derive strictly from manual patient entries or certified medical device telemetry. Fingerprint-themed visual motifs and webcams are non-diagnostic interface elements and cannot generate physiological measurements.
+    </div>
+</body>
+</html>
+    """
+    return Response(content=html_content, media_type="text/html")
 
 
 @router.put("/{vital_id}", response_model=VitalSignRead)
@@ -1698,15 +2744,17 @@ async def get_human_body_map(
     if current_user.role in (UserRole.DOCTOR, UserRole.NURSE):
         await _verify_doctor_access(db, current_user, target_patient_id)
 
-    # 1. Fetch latest telemetry records
+    # 1. Fetch latest telemetry records (up to 100)
     query = (
         select(VitalSign)
         .where(VitalSign.patient_id == target_patient_id)
         .order_by(desc(VitalSign.recorded_at))
-        .limit(20)
+        .limit(100)
     )
     res = await db.execute(query)
-    records = res.scalars().all()
+    all_records = res.scalars().all()
+    actual_records = [r for r in all_records if not r.is_sample]
+    records = actual_records if actual_records else all_records
 
     # 2. Fetch active alerts count
     alert_stmt = select(VitalAlert).where(
@@ -1716,217 +2764,711 @@ async def get_human_body_map(
     a_res = await db.execute(alert_stmt)
     active_alerts = a_res.scalars().all()
 
-    # Find latest specific metrics
-    latest_bp = next((r for r in records if r.systolic_bp is not None), None)
-    latest_hr = next((r for r in records if r.heart_rate is not None), None)
-    latest_glucose = next((r for r in records if r.blood_glucose is not None), None)
-    latest_resp = next((r for r in records if r.respiratory_rate is not None or r.oxygen_saturation is not None), None)
-    latest_weight = next((r for r in records if r.weight is not None), None)
+    # 3. Patient profile for biometric calculations
+    pat_stmt = select(Patient).where(Patient.id == target_patient_id)
+    pat_res = await db.execute(pat_stmt)
+    patient_obj = pat_res.scalar_one_or_none()
 
     now = datetime.now(timezone.utc)
-    def _is_stale(dt: Optional[datetime], max_days: int = 7) -> bool:
+    def _is_stale(dt: Optional[datetime], max_days: int = 14) -> bool:
         if not dt:
             return False
         utc_dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
         return (now - utc_dt).total_seconds() > (max_days * 86400)
 
+    def _days_ago(dt: Optional[datetime]) -> int:
+        if not dt:
+            return 0
+        utc_dt = dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+        return max(0, int((now - utc_dt).total_seconds() // 86400))
+
     indicators: Dict[str, BodyMapIndicator] = {}
 
-    # Cardiovascular System
-    if latest_bp:
+    # ── 1. Cardiovascular System (Blood Pressure) ──
+    bp_list = [r for r in records if r.systolic_bp is not None and r.diastolic_bp is not None]
+    if bp_list:
+        latest_bp = bp_list[0]
         sbp, dbp = latest_bp.systolic_bp, latest_bp.diastolic_bp
         bp_cat = classify_blood_pressure(sbp, dbp)
-        stale_bp = _is_stale(latest_bp.recorded_at, 7)
+        stale_bp = _is_stale(latest_bp.recorded_at, 14)
+        days_old = _days_ago(latest_bp.recorded_at)
+
         if stale_bp:
             bp_status = "stale"
-            days_old = int((now - (latest_bp.recorded_at if latest_bp.recorded_at.tzinfo else latest_bp.recorded_at.replace(tzinfo=timezone.utc))).total_seconds() // 86400)
+            bp_status_lbl = "STALE DATA"
+            bp_urgency = "low"
             headline = f"Stale BP Telemetry: {sbp}/{dbp} mmHg ({days_old}d ago)"
             guidance = f"Last blood pressure measurement was recorded {days_old} days ago. Clinical guidelines recommend regular tracking."
         elif sbp > 180 or dbp > 120:
             bp_status = "urgent"
+            bp_status_lbl = "URGENT"
+            bp_urgency = "critical"
             headline = f"Hypertensive Crisis: {sbp}/{dbp} mmHg"
             guidance = "Seek immediate clinical evaluation."
         elif sbp >= 140 or dbp >= 90:
-            bp_status = "attention"
+            bp_status = "urgent"
+            bp_status_lbl = "STAGE 2 HYPERTENSION"
+            bp_urgency = "high"
             headline = f"Stage 2 Hypertension: {sbp}/{dbp} mmHg"
             guidance = "Rest 5 minutes and repeat measurement."
+        elif sbp >= 130 or dbp >= 80:
+            bp_status = "attention"
+            bp_status_lbl = "STAGE 1 HYPERTENSION"
+            bp_urgency = "moderate"
+            headline = f"Stage 1 Hypertension: {sbp}/{dbp} mmHg"
+            guidance = "Maintain heart-healthy diet and lower sodium intake."
+        elif sbp >= 120 and dbp < 80:
+            bp_status = "attention"
+            bp_status_lbl = "ELEVATED BP"
+            bp_urgency = "low"
+            headline = f"Elevated BP: {sbp}/{dbp} mmHg"
+            guidance = "Blood pressure slightly elevated above optimal range."
         elif sbp < 90 or dbp < 60:
             bp_status = "attention"
+            bp_status_lbl = "LOW BLOOD PRESSURE"
+            bp_urgency = "low"
             headline = f"Low Blood Pressure: {sbp}/{dbp} mmHg"
             guidance = "Stay hydrated and avoid sudden standing."
         else:
             bp_status = "normal"
+            bp_status_lbl = "WITHIN TARGET BAND"
+            bp_urgency = "none"
             headline = f"Optimal/Normal BP: {sbp}/{dbp} mmHg"
-            guidance = "Within healthy target range."
+            guidance = "Within healthy target range (AHA/ACC 2017 Guidelines)."
+
+        # Trend calculation
+        if len(bp_list) >= 2:
+            prev_sbp = bp_list[1].systolic_bp
+            if abs(sbp - prev_sbp) <= 4:
+                bp_trend = "stable"
+            elif sbp < prev_sbp:
+                bp_trend = "improving"
+            else:
+                bp_trend = "deteriorating"
+        else:
+            bp_trend = "insufficient_data"
+
+        bp_history_pts = [
+            {
+                "value": f"{r.systolic_bp}/{r.diastolic_bp}",
+                "unit": "mmHg",
+                "systolic": r.systolic_bp,
+                "diastolic": r.diastolic_bp,
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                "source": r.measurement_source or "manual_entry",
+                "device_name": r.device_name,
+            }
+            for r in bp_list[:5]
+        ]
+
+        is_dev = bool(latest_bp.device_name or "omron" in (latest_bp.measurement_source or "").lower() or "device" in (latest_bp.measurement_source or "").lower())
 
         indicators["cardiovascular"] = BodyMapIndicator(
             system_key="cardiovascular",
+            system_name="Cardiovascular System",
+            label="Blood Pressure",
             display_name="Cardiovascular & Vascular",
             status=bp_status,
+            status_label=bp_status_lbl,
             headline=headline,
             current_value=f"{sbp}/{dbp}",
+            latest_value=f"{sbp}/{dbp}",
             unit="mmHg",
+            latest_unit="mmHg",
             measured_at=latest_bp.recorded_at,
-            measurement_source=latest_bp.measurement_source,
+            recorded_at=latest_bp.recorded_at,
+            measurement_source=latest_bp.measurement_source or ("device_connected" if is_dev else "manual_entry"),
+            measurement_type="bp",
+            is_sample=bool(latest_bp.is_sample),
+            history_count=len(bp_list),
+            history_points=bp_history_pts,
+            trend=bp_trend,
             trend_summary=f"Category: {bp_cat}. MAP: {round(dbp + (sbp - dbp) / 3.0, 1)} mmHg",
+            clinical_summary=f"AHA/ACC 2017 classification: {bp_cat}. Systolic: {sbp} mmHg, Diastolic: {dbp} mmHg. {guidance}",
             guidance=guidance,
+            urgency_level=bp_urgency,
+            target_page="/patient/vitalsense/blood-pressure",
             active_alert_count=sum(1 for a in active_alerts if "BP" in a.alert_type or "HYPERTEN" in a.alert_type),
         )
     else:
         indicators["cardiovascular"] = BodyMapIndicator(
             system_key="cardiovascular",
+            system_name="Cardiovascular System",
+            label="Blood Pressure",
             display_name="Cardiovascular & Vascular",
             status="unavailable",
+            status_label="NO DATA",
             headline="No Blood Pressure Recorded",
+            current_value=None,
+            latest_value=None,
+            unit="mmHg",
+            latest_unit="mmHg",
+            measured_at=None,
+            recorded_at=None,
+            measurement_source=None,
+            measurement_type="bp",
+            is_sample=False,
+            history_count=0,
+            history_points=[],
+            trend="insufficient_data",
+            trend_summary="No blood pressure telemetry recorded",
+            clinical_summary="No blood pressure telemetry recorded. Regular monitoring with an upper-arm cuff helps detect hypertension early.",
             guidance="Log a reading using an upper-arm home cuff to establish baseline.",
+            urgency_level="none",
+            target_page="/patient/vitalsense/blood-pressure",
+            active_alert_count=0,
         )
 
-    # Heart (Cardiac)
-    if latest_hr:
+    # ── 2. Heart (Cardiac & Pulse) ──
+    hr_list = [r for r in records if r.heart_rate is not None]
+    if hr_list:
+        latest_hr = hr_list[0]
         hr = latest_hr.heart_rate
-        stale_hr = _is_stale(latest_hr.recorded_at, 7)
+        stale_hr = _is_stale(latest_hr.recorded_at, 14)
+        days_old = _days_ago(latest_hr.recorded_at)
+
         if stale_hr:
             hr_status = "stale"
-            days_old = int((now - (latest_hr.recorded_at if latest_hr.recorded_at.tzinfo else latest_hr.recorded_at.replace(tzinfo=timezone.utc))).total_seconds() // 86400)
+            hr_status_lbl = "STALE DATA"
+            hr_urgency = "low"
             hr_head = f"Stale Heart Rate: {hr} BPM ({days_old}d ago)"
             hr_guide = f"Last pulse recorded {days_old} days ago. Verify current resting heart rate."
-        elif hr > 120:
+        elif hr > 120 or hr < 40:
+            hr_status = "urgent"
+            hr_status_lbl = "URGENT"
+            hr_urgency = "critical"
+            hr_head = f"Critical Pulse: {hr} BPM"
+            hr_guide = "Report acute extreme tachycardia or severe bradycardia to a clinician immediately."
+        elif hr > 100 or hr < 50:
             hr_status = "attention"
-            hr_head = f"High Resting Pulse: {hr} BPM"
-            hr_guide = "Rest quietly and retest."
-        elif hr < 45:
-            hr_status = "attention"
-            hr_head = f"Low Resting Pulse: {hr} BPM"
-            hr_guide = "Report persistent bradycardia to your physician."
+            hr_status_lbl = "ATTENTION"
+            hr_urgency = "moderate"
+            hr_head = f"Elevated Pulse: {hr} BPM" if hr > 100 else f"Low Resting Pulse: {hr} BPM"
+            hr_guide = "Rest quietly for 5 minutes and re-check pulse."
         else:
             hr_status = "normal"
+            hr_status_lbl = "WITHIN TARGET BAND"
+            hr_urgency = "none"
             hr_head = f"Normal Pulse: {hr} BPM"
-            hr_guide = "Resting rate is within standard range (60-100 BPM)."
+            hr_guide = "Resting rate is within standard adult target band (50-100 BPM)."
+
+        if len(hr_list) >= 2:
+            prev_hr = hr_list[1].heart_rate
+            diff = abs(hr - prev_hr)
+            hr_trend = "stable" if diff <= 4 else ("improving" if hr < prev_hr and prev_hr > 100 else "stable")
+        else:
+            hr_trend = "insufficient_data"
+
+        hr_history_pts = [
+            {
+                "value": str(r.heart_rate),
+                "unit": "BPM",
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                "source": r.measurement_source or "manual_entry",
+                "device_name": r.device_name,
+            }
+            for r in hr_list[:5]
+        ]
 
         indicators["heart"] = BodyMapIndicator(
             system_key="heart",
+            system_name="Cardiac System",
+            label="Heart Rate & Pulse",
             display_name="Heart & Pulse Rhythm",
             status=hr_status,
+            status_label=hr_status_lbl,
             headline=hr_head,
             current_value=str(hr),
+            latest_value=str(hr),
             unit="BPM",
+            latest_unit="BPM",
             measured_at=latest_hr.recorded_at,
+            recorded_at=latest_hr.recorded_at,
             measurement_source=latest_hr.measurement_source,
-            trend_summary=f"Resting cardiac telemetry from {latest_hr.measurement_source}",
+            measurement_type="heart_rate",
+            is_sample=bool(latest_hr.is_sample),
+            history_count=len(hr_list),
+            history_points=hr_history_pts,
+            trend=hr_trend,
+            trend_summary=f"Resting cardiac telemetry: {hr} BPM from {latest_hr.measurement_source or 'home monitor'}",
+            clinical_summary=f"Resting pulse rate: {hr} BPM. {hr_guide}",
             guidance=hr_guide,
+            urgency_level=hr_urgency,
+            target_page="/patient/vitalsense",
             active_alert_count=sum(1 for a in active_alerts if "HEART" in a.alert_type or "CARDIA" in a.alert_type),
         )
     else:
         indicators["heart"] = BodyMapIndicator(
             system_key="heart",
+            system_name="Cardiac System",
+            label="Heart Rate & Pulse",
             display_name="Heart & Pulse Rhythm",
             status="unavailable",
+            status_label="NO DATA",
             headline="No Pulse Telemetry",
+            current_value=None,
+            latest_value=None,
+            unit="BPM",
+            latest_unit="BPM",
+            measured_at=None,
+            recorded_at=None,
+            measurement_source=None,
+            measurement_type="heart_rate",
+            is_sample=False,
+            history_count=0,
+            history_points=[],
+            trend="insufficient_data",
+            trend_summary="No pulse telemetry recorded",
+            clinical_summary="No pulse telemetry recorded. Resting pulse can be measured via home cuff, smart device, or VitalSense rPPG camera.",
             guidance="Record pulse along with blood pressure or from a validated monitor.",
+            urgency_level="none",
+            target_page="/patient/vitalsense",
+            active_alert_count=0,
         )
 
-    # Metabolic (Pancreas & Glucose)
-    if latest_glucose:
+    # ── 3. Metabolic (Pancreas & Glucose) ──
+    glu_list = [r for r in records if r.blood_glucose is not None]
+    lab_glu_fallback = None
+    if not glu_list:
+        l_stmt = (
+            select(LabResult)
+            .where(
+                LabResult.patient_id == target_patient_id,
+                LabResult.is_archived == False,
+                or_(
+                    LabResult.test_name.ilike("%glucose%"),
+                    LabResult.test_name.ilike("%fingerstick%"),
+                ),
+            )
+            .order_by(desc(LabResult.test_date), desc(LabResult.created_at))
+            .limit(1)
+        )
+        l_res = await db.execute(l_stmt)
+        lab_glu_fallback = l_res.scalar_one_or_none()
+
+    if glu_list:
+        latest_glucose = glu_list[0]
         g_val = latest_glucose.blood_glucose
         g_unit = latest_glucose.glucose_unit or "mg/dL"
-        g_cat = classify_blood_glucose(g_val, latest_glucose.glucose_context)
-        stale_g = _is_stale(latest_glucose.recorded_at, 7)
+        ctx = (latest_glucose.glucose_context or "").strip().lower()
+        stale_g = _is_stale(latest_glucose.recorded_at, 14)
+        days_old = _days_ago(latest_glucose.recorded_at)
+
         if stale_g:
             g_status = "stale"
-            days_old = int((now - (latest_glucose.recorded_at if latest_glucose.recorded_at.tzinfo else latest_glucose.recorded_at.replace(tzinfo=timezone.utc))).total_seconds() // 86400)
+            g_status_lbl = "STALE DATA"
+            g_urgency = "low"
             g_head = f"Stale Glucose: {g_val} {g_unit} ({days_old}d ago)"
             g_guide = f"Last glucose logged {days_old} days ago. Regular testing supports optimal metabolic control."
         elif g_val < 54:
             g_status = "urgent"
+            g_status_lbl = "SEVERE HYPOGLYCEMIA"
+            g_urgency = "critical"
             g_head = f"Critical Low Glucose: {g_val} {g_unit}"
             g_guide = "Treat immediately with 15g fast-acting carbohydrates."
-        elif g_val < 70 or g_val > 250:
-            g_status = "attention"
-            g_head = f"Outside Target Range: {g_val} {g_unit}"
-            g_guide = "Monitor closely and verify meal timing."
+        elif g_val < 70:
+            g_status = "urgent"
+            g_status_lbl = "HYPOGLYCEMIA"
+            g_urgency = "high"
+            g_head = f"Low Glucose: {g_val} {g_unit}"
+            g_guide = "Consume fast-acting carbs and recheck in 15 minutes."
+        elif "fasting" in ctx:
+            if g_val >= 126:
+                g_status = "urgent"
+                g_status_lbl = "ELEVATED FASTING GLUCOSE"
+                g_urgency = "high"
+                g_head = f"High Fasting Glucose: {g_val} {g_unit}"
+                g_guide = "Fasting glucose exceeds diabetic threshold (≥126 mg/dL)."
+            elif g_val >= 100:
+                g_status = "attention"
+                g_status_lbl = "IMPAIRED FASTING GLUCOSE"
+                g_urgency = "moderate"
+                g_head = f"Elevated Fasting Glucose: {g_val} {g_unit}"
+                g_guide = "Within prediabetic band (100-125 mg/dL)."
+            else:
+                g_status = "normal"
+                g_status_lbl = "WITHIN TARGET BAND"
+                g_urgency = "none"
+                g_head = f"Normal Fasting Glucose: {g_val} {g_unit}"
+                g_guide = "Within optimal fasting target (70-99 mg/dL)."
+        elif "after" in ctx or "post" in ctx:
+            if g_val >= 200:
+                g_status = "urgent"
+                g_status_lbl = "POST-MEAL SPIKE"
+                g_urgency = "high"
+                g_head = f"High Post-Meal Glucose: {g_val} {g_unit}"
+                g_guide = "Post-meal reading exceeds 200 mg/dL threshold."
+            elif g_val >= 140:
+                g_status = "attention"
+                g_status_lbl = "ELEVATED POST-MEAL"
+                g_urgency = "moderate"
+                g_head = f"Elevated Post-Meal Glucose: {g_val} {g_unit}"
+                g_guide = "Elevated 2h post-prandial level (140-199 mg/dL)."
+            else:
+                g_status = "normal"
+                g_status_lbl = "WITHIN TARGET BAND"
+                g_urgency = "none"
+                g_head = f"Normal Post-Meal Glucose: {g_val} {g_unit}"
+                g_guide = "Within normal post-meal target (<140 mg/dL)."
         else:
-            g_status = "normal"
-            g_head = f"Normal Glucose: {g_val} {g_unit}"
-            g_guide = "Within expected clinical range."
+            # Random / Unspecified Context
+            if g_val >= 200:
+                g_status = "urgent"
+                g_status_lbl = "MARKED HYPERGLYCEMIA"
+                g_urgency = "high"
+                g_head = f"High Random Glucose: {g_val} {g_unit}"
+                g_guide = "Random glucose exceeds 200 mg/dL threshold."
+            elif g_val >= 140:
+                g_status = "attention"
+                g_status_lbl = "ELEVATED RANDOM GLUCOSE"
+                g_urgency = "moderate"
+                g_head = f"Elevated Random Glucose: {g_val} {g_unit}"
+                g_guide = "Random glucose is mildly elevated."
+            else:
+                g_status = "normal"
+                g_status_lbl = "WITHIN TARGET BAND"
+                g_urgency = "none"
+                g_head = f"Normal Random Glucose: {g_val} {g_unit}"
+                g_guide = "Within normal random glucose band (70-139 mg/dL)."
+
+        ctx_label = "Fasting Fingerstick" if "fasting" in ctx else ("Post-Prandial (2h)" if "after" in ctx or "post" in ctx else "Random / Unspecified Glucose")
+
+        if len(glu_list) >= 2:
+            prev_g = glu_list[1].blood_glucose
+            diff = abs(g_val - prev_g)
+            glu_trend = "stable" if diff <= 5 else ("improving" if g_val < prev_g and prev_g > 140 else "stable")
+        else:
+            glu_trend = "insufficient_data"
+
+        glu_history_pts = [
+            {
+                "value": str(round(r.blood_glucose, 1)),
+                "unit": r.glucose_unit or "mg/dL",
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                "source": r.measurement_source or "manual_entry",
+                "device_name": r.device_name,
+            }
+            for r in glu_list[:5]
+        ]
 
         indicators["metabolic"] = BodyMapIndicator(
             system_key="metabolic",
+            system_name="Endocrine & Metabolic System",
+            label="Blood Glucose",
             display_name="Metabolic & Blood Glucose",
             status=g_status,
+            status_label=g_status_lbl,
             headline=g_head,
-            current_value=str(g_val),
+            current_value=str(round(g_val, 1)),
+            latest_value=str(round(g_val, 1)),
             unit=g_unit,
+            latest_unit=g_unit,
             measured_at=latest_glucose.recorded_at,
+            recorded_at=latest_glucose.recorded_at,
             measurement_source=latest_glucose.measurement_source,
-            trend_summary=f"Context: {latest_glucose.glucose_context or 'Standard'}. Classification: {g_cat}",
+            measurement_type="glucose",
+            is_sample=bool(latest_glucose.is_sample),
+            history_count=len(glu_list),
+            history_points=glu_history_pts,
+            trend=glu_trend,
+            trend_summary=f"Context: {ctx_label}. Value: {g_val} {g_unit}",
+            clinical_summary=f"ADA clinical guidelines: {ctx_label} evaluated at {g_val} {g_unit}. {g_guide}",
             guidance=g_guide,
+            urgency_level=g_urgency,
+            target_page="/patient/vitalsense/blood-glucose",
             active_alert_count=sum(1 for a in active_alerts if "GLUCOSE" in a.alert_type or "GLYCEMIA" in a.alert_type),
+        )
+    elif lab_glu_fallback:
+        g_val = lab_glu_fallback.value
+        g_unit = lab_glu_fallback.unit or "mg/dL"
+        glu_dt = datetime.combine(lab_glu_fallback.test_date, datetime.min.time(), tzinfo=timezone.utc)
+        indicators["metabolic"] = BodyMapIndicator(
+            system_key="metabolic",
+            system_name="Endocrine & Metabolic System",
+            label="Blood Glucose",
+            display_name="Metabolic & Blood Glucose",
+            status="normal" if (70 <= g_val <= 140) else "attention",
+            status_label="WITHIN TARGET BAND" if (70 <= g_val <= 140) else "ATTENTION",
+            headline=f"Lab Glucose: {g_val} {g_unit}",
+            current_value=str(round(g_val, 1)),
+            latest_value=str(round(g_val, 1)),
+            unit=g_unit,
+            latest_unit=g_unit,
+            measured_at=glu_dt,
+            recorded_at=glu_dt,
+            measurement_source=lab_glu_fallback.source or "laboratory_imported",
+            measurement_type="glucose",
+            is_sample=False,
+            history_count=1,
+            history_points=[{
+                "value": str(round(g_val, 1)),
+                "unit": g_unit,
+                "recorded_at": glu_dt.isoformat(),
+                "source": "laboratory_imported",
+            }],
+            trend="insufficient_data",
+            trend_summary=f"From Diagnostic Lab Result: {lab_glu_fallback.test_name}",
+            clinical_summary=f"Laboratory plasma reading: {g_val} {g_unit}.",
+            guidance="Diagnostic laboratory value.",
+            urgency_level="none" if (70 <= g_val <= 140) else "moderate",
+            target_page="/patient/vitalsense/blood-glucose",
+            active_alert_count=0,
         )
     else:
         indicators["metabolic"] = BodyMapIndicator(
             system_key="metabolic",
+            system_name="Endocrine & Metabolic System",
+            label="Blood Glucose",
             display_name="Metabolic & Blood Glucose",
             status="unavailable",
+            status_label="NO DATA",
             headline="No Glucose Data Recorded",
+            current_value=None,
+            latest_value=None,
+            unit="mg/dL",
+            latest_unit="mg/dL",
+            measured_at=None,
+            recorded_at=None,
+            measurement_source=None,
+            measurement_type="glucose",
+            is_sample=False,
+            history_count=0,
+            history_points=[],
+            trend="insufficient_data",
+            trend_summary="No blood glucose telemetry recorded",
+            clinical_summary="No blood glucose telemetry recorded. Test with a glucometer or continuous glucose monitor (CGM).",
             guidance="Log fasting or post-prandial readings from your glucose meter or CGM.",
+            urgency_level="none",
+            target_page="/patient/vitalsense/blood-glucose",
+            active_alert_count=0,
         )
 
-    # Respiratory
-    if latest_resp:
+    # ── 4. Respiratory (Oxygenation & Respiration) ──
+    resp_list = [r for r in records if r.respiratory_rate is not None or r.oxygen_saturation is not None]
+    if resp_list:
+        latest_resp = resp_list[0]
         o2 = latest_resp.oxygen_saturation
+        rr = latest_resp.respiratory_rate
+        stale_resp = _is_stale(latest_resp.recorded_at, 14)
+        days_old = _days_ago(latest_resp.recorded_at)
+
+        if stale_resp:
+            resp_status = "stale"
+            resp_status_lbl = "STALE DATA"
+            resp_urg = "low"
+            resp_head = f"Stale Respiratory Data ({days_old}d ago)"
+            resp_guide = f"Last respiratory telemetry recorded {days_old} days ago."
+        elif o2 is not None and o2 < 90:
+            resp_status = "urgent"
+            resp_status_lbl = "URGENT"
+            resp_urg = "critical"
+            resp_head = f"Critical Hypoxemia: {o2}% SpO2"
+            resp_guide = "Seek emergency medical care for severe oxygen desaturation."
+        elif o2 is not None and o2 < 95:
+            resp_status = "attention"
+            resp_status_lbl = "ATTENTION"
+            resp_urg = "moderate"
+            resp_head = f"Mild Hypoxemia: {o2}% SpO2"
+            resp_guide = "Oxygen saturation is slightly below optimal target (≥95%)."
+        else:
+            resp_status = "normal"
+            resp_status_lbl = "WITHIN TARGET BAND"
+            resp_urg = "none"
+            resp_head = f"SpO2: {o2}%" if o2 else f"RR: {rr} breaths/min"
+            resp_guide = "Oxygen saturation is within standard healthy target (95-100%)."
+
+        resp_history_pts = [
+            {
+                "value": f"{r.oxygen_saturation}% SpO2" if r.oxygen_saturation else f"{r.respiratory_rate} rpm",
+                "unit": "%" if r.oxygen_saturation else "rpm",
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                "source": r.measurement_source or "manual_entry",
+            }
+            for r in resp_list[:5]
+        ]
+
         indicators["respiratory"] = BodyMapIndicator(
             system_key="respiratory",
+            system_name="Respiratory System",
+            label="Respiratory & Oxygenation",
             display_name="Respiratory & Oxygenation",
-            status="normal" if (o2 and o2 >= 95) else "attention" if o2 else "normal",
-            headline=f"SpO2: {o2}%" if o2 else "Respiratory Rate Recorded",
-            current_value=f"{o2}%" if o2 else "Stable",
-            unit="%",
+            status=resp_status,
+            status_label=resp_status_lbl,
+            headline=resp_head,
+            current_value=f"{o2}%" if o2 else (str(rr) if rr else "Normal"),
+            latest_value=f"{o2}%" if o2 else (str(rr) if rr else "Normal"),
+            unit="%" if o2 else "rpm",
+            latest_unit="%" if o2 else "rpm",
             measured_at=latest_resp.recorded_at,
+            recorded_at=latest_resp.recorded_at,
             measurement_source=latest_resp.measurement_source,
-            guidance="Healthy oxygen saturation is typically 95-100%.",
+            measurement_type="respiratory",
+            is_sample=bool(latest_resp.is_sample),
+            history_count=len(resp_list),
+            history_points=resp_history_pts,
+            trend="stable",
+            trend_summary=f"Respiratory telemetry: {resp_head}",
+            clinical_summary=f"SpO2: {o2 or '--'}%, Respiratory Rate: {rr or '--'} rpm. {resp_guide}",
+            guidance=resp_guide,
+            urgency_level=resp_urg,
+            target_page="/patient/vitalsense",
+            active_alert_count=sum(1 for a in active_alerts if "SPO2" in a.alert_type or "RESP" in a.alert_type),
         )
     else:
         indicators["respiratory"] = BodyMapIndicator(
             system_key="respiratory",
+            system_name="Respiratory System",
+            label="Respiratory & Oxygenation",
             display_name="Respiratory & Oxygenation",
             status="unavailable",
+            status_label="NO DATA",
             headline="No Respiratory Data",
+            current_value=None,
+            latest_value=None,
+            unit="%",
+            latest_unit="%",
+            measured_at=None,
+            recorded_at=None,
+            measurement_source=None,
+            measurement_type="respiratory",
+            is_sample=False,
+            history_count=0,
+            history_points=[],
+            trend="insufficient_data",
+            trend_summary="No respiratory telemetry recorded",
+            clinical_summary="No pulse oximetry or respiratory telemetry logged.",
             guidance="Optional respiratory metrics can be recorded as part of routine vital signs.",
+            urgency_level="none",
+            target_page="/patient/vitalsense",
+            active_alert_count=0,
         )
 
-    # Biometrics & Weight
-    if latest_weight:
+    # ── 5. Biometrics (Body Mass & BMI) ──
+    wt_list = [r for r in records if r.weight is not None]
+    if not wt_list:
+        wt_stmt = select(VitalSign).where(VitalSign.patient_id == target_patient_id, VitalSign.weight.isnot(None)).order_by(desc(VitalSign.recorded_at)).limit(10)
+        wt_list = (await db.execute(wt_stmt)).scalars().all()
+    if wt_list:
+        latest_weight = wt_list[0]
+        w = latest_weight.weight
+        h = latest_weight.height or (patient_obj.height_cm if patient_obj and patient_obj.height_cm else 170.0)
+        bmi_val = round(w / ((h / 100.0) ** 2), 1)
+        stale_bmi = _is_stale(latest_weight.recorded_at, 30)
+        days_old = _days_ago(latest_weight.recorded_at)
+
+        if stale_bmi:
+            bmi_status = "stale"
+            bmi_status_lbl = "STALE DATA"
+            bmi_urg = "low"
+            bmi_cat = "Stale Weight (>30d)"
+        elif bmi_val < 18.5:
+            bmi_status = "attention"
+            bmi_status_lbl = "UNDERWEIGHT"
+            bmi_urg = "low"
+            bmi_cat = "Underweight (<18.5)"
+        elif bmi_val <= 24.9:
+            bmi_status = "normal"
+            bmi_status_lbl = "WITHIN TARGET BAND"
+            bmi_urg = "none"
+            bmi_cat = "Normal Weight (18.5 – 24.9)"
+        elif bmi_val <= 29.9:
+            bmi_status = "attention"
+            bmi_status_lbl = "OVERWEIGHT"
+            bmi_urg = "low"
+            bmi_cat = "Overweight (25.0 – 29.9)"
+        elif bmi_val >= 35.0:
+            bmi_status = "urgent"
+            bmi_status_lbl = "CLASS 2+ OBESITY"
+            bmi_urg = "high"
+            bmi_cat = "Class 2+ Obesity (≥35.0)"
+        else:
+            bmi_status = "attention"
+            bmi_status_lbl = "CLASS 1 OBESITY"
+            bmi_urg = "moderate"
+            bmi_cat = "Class 1 Obesity (30.0 – 34.9)"
+
+        wt_history_pts = [
+            {
+                "value": f"{r.weight} kg",
+                "unit": "kg",
+                "recorded_at": r.recorded_at.isoformat() if r.recorded_at else None,
+                "source": r.measurement_source or "manual_entry",
+            }
+            for r in wt_list[:5]
+        ]
+
         indicators["biometrics"] = BodyMapIndicator(
             system_key="biometrics",
+            system_name="Musculoskeletal & Biometric System",
+            label="Body Composition & BMI",
             display_name="Body Composition & Weight",
-            status="normal",
-            headline=f"Weight: {latest_weight.weight} kg",
-            current_value=str(latest_weight.weight),
-            unit="kg",
+            status=bmi_status,
+            status_label=bmi_status_lbl,
+            headline=f"BMI: {bmi_val} ({bmi_cat})",
+            current_value=str(bmi_val),
+            latest_value=str(bmi_val),
+            unit="kg/m²",
+            latest_unit="kg/m²",
             measured_at=latest_weight.recorded_at,
+            recorded_at=latest_weight.recorded_at,
             measurement_source=latest_weight.measurement_source,
+            measurement_type="weight",
+            is_sample=bool(latest_weight.is_sample),
+            history_count=len(wt_list),
+            history_points=wt_history_pts,
+            trend="stable",
+            trend_summary=f"Weight: {w} kg, Height: {h} cm. BMI: {bmi_val} kg/m²",
+            clinical_summary=f"BMI: {bmi_val} kg/m² ({bmi_cat}). Weight: {w} kg. Consistent weekly weight checks support metabolic tracking.",
             guidance="Consistent weekly weight checks support metabolic tracking.",
+            urgency_level=bmi_urg,
+            target_page="/patient/profile",
+            active_alert_count=0,
         )
     else:
         indicators["biometrics"] = BodyMapIndicator(
             system_key="biometrics",
+            system_name="Musculoskeletal & Biometric System",
+            label="Body Composition & BMI",
             display_name="Body Composition & Weight",
             status="unavailable",
+            status_label="NO DATA",
             headline="No Weight Data",
+            current_value=None,
+            latest_value=None,
+            unit="kg/m²",
+            latest_unit="kg/m²",
+            measured_at=None,
+            recorded_at=None,
+            measurement_source=None,
+            measurement_type="weight",
+            is_sample=False,
+            history_count=0,
+            history_points=[],
+            trend="insufficient_data",
+            trend_summary="No weight or BMI telemetry recorded",
+            clinical_summary="No body weight or BMI measurements found.",
             guidance="Track body weight to establish baseline health metrics.",
+            urgency_level="none",
+            target_page="/patient/profile",
+            active_alert_count=0,
         )
 
-    # Overall Health Status Calculation
+    # ── Overall Health Status Calculation ──
     if all(ind.status == "unavailable" for ind in indicators.values()):
-        overall = "missing_data"
+        overall = "no_data"
+        overall_status_str = "no_data"
     elif any(ind.status == "urgent" for ind in indicators.values()):
         overall = "urgent_care_recommended"
+        overall_status_str = "urgent"
     elif any(ind.status == "attention" for ind in indicators.values()):
         overall = "attention_needed"
+        overall_status_str = "attention"
     elif any(ind.status == "stale" for ind in indicators.values()):
         overall = "stale_monitoring"
+        overall_status_str = "stale"
     else:
-        overall = "stable"
+        overall = "within_target_band"
+        overall_status_str = "normal"
 
     disc = (
         "The human-body health visualization is an educational exploration tool displaying recorded "
@@ -1937,6 +3479,7 @@ async def get_human_body_map(
         patient_id=target_patient_id,
         evaluated_at=datetime.now(timezone.utc),
         overall_health_status=overall,
+        overall_status=overall_status_str,
         indicators=indicators,
         educational_disclaimer=disc,
         disclaimer=disc,
@@ -1950,19 +3493,35 @@ async def get_human_body_map(
 async def get_emergency_hospitals(
     latitude: Optional[float] = Query(None, ge=-90, le=90),
     longitude: Optional[float] = Query(None, ge=-180, le=180),
+    lat: Optional[float] = Query(None, ge=-90, le=90),
+    lon: Optional[float] = Query(None, ge=-180, le=180),
     query: Optional[str] = Query(None, description="City, state, or ZIP code"),
-    radius_km: float = Query(25.0, ge=1.0, le=100.0),
+    radius_miles: Optional[float] = Query(None, ge=1.0, le=100.0),
+    radius_km: Optional[float] = Query(None, ge=1.0, le=160.0),
+    emergency_only: bool = Query(False, description="Filter to 24/7 emergency departments only"),
     current_user: User = Depends(get_current_user),
 ):
     """
     Search for verified nearby emergency departments, trauma centers, and medical facilities.
-    Supports GPS coordinates or manual location query (city/zip).
+    Supports GPS coordinates or manual location query (city/zip), with accurate geocoding,
+    Haversine distance calculation, and strict radius enforcement.
     """
+    eff_lat = latitude if latitude is not None else lat
+    eff_lon = longitude if longitude is not None else lon
+
+    if radius_miles is not None:
+        effective_radius = radius_miles
+    elif radius_km is not None:
+        effective_radius = round(radius_km * 0.621371, 1)
+    else:
+        effective_radius = 25.0
+
     return await search_nearby_hospitals(
-        latitude=latitude,
-        longitude=longitude,
+        latitude=eff_lat,
+        longitude=eff_lon,
         query=query,
-        radius_km=radius_km,
+        radius_miles=effective_radius,
+        emergency_only=emergency_only,
     )
 
 

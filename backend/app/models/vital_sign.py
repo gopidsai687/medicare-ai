@@ -89,6 +89,155 @@ class VitalSign(UUIDMixin, TimestampMixin, Base):
         return f"<VitalSign patient_id={self.patient_id} recorded_at={self.recorded_at} sbp={self.systolic_bp} dbp={self.diastolic_bp} gluc={self.blood_glucose}>"
 
 
+class GlucoseMeasurement(UUIDMixin, TimestampMixin, Base):
+    """
+    Dedicated blood glucose measurement entity.
+    Tracks quantitative glucose readings, nutritional timing context, unit (mg/dL or mmol/L),
+    standardized mmol/L equivalent, and verified device/manual provenance.
+    """
+    __tablename__ = "glucose_measurements"
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    glucose_value: Mapped[float] = mapped_column(Float, nullable=False)
+    glucose_value_mmol: Mapped[float] = mapped_column(Float, nullable=False)
+    unit: Mapped[str] = mapped_column(String(10), default="mg/dL", nullable=False)
+    glucose_context: Mapped[str] = mapped_column(String(50), default="fasting", nullable=False)  # fasting, before_meal, after_meal, bedtime, other
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(50), default="manual_entry", nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    device_identifier: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    device_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType(),
+        ForeignKey("device_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    external_reading_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    reading_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
+    device_connection = relationship("DeviceConnection", foreign_keys=[device_connection_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<GlucoseMeasurement id={self.id} patient_id={self.patient_id} value={self.glucose_value} {self.unit} context={self.glucose_context}>"
+
+
+class BloodPressureMeasurement(UUIDMixin, TimestampMixin, Base):
+    """
+    Dedicated blood pressure measurement entity.
+    Tracks systolic, diastolic, pulse, unit (mmHg), AHA classification, and provenance.
+    """
+    __tablename__ = "blood_pressure_measurements"
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    systolic: Mapped[int] = mapped_column(Integer, nullable=False)
+    diastolic: Mapped[int] = mapped_column(Integer, nullable=False)
+    pulse: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    unit: Mapped[str] = mapped_column(String(10), default="mmHg", nullable=False)
+    measured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    source_type: Mapped[str] = mapped_column(String(50), default="manual_entry", nullable=False)
+    device_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    device_identifier: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    device_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType(),
+        ForeignKey("device_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    external_reading_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    reading_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
+    device_connection = relationship("DeviceConnection", foreign_keys=[device_connection_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<BloodPressureMeasurement id={self.id} patient_id={self.patient_id} {self.systolic}/{self.diastolic} {self.unit} pulse={self.pulse}>"
+
+
+class DeviceConnection(UUIDMixin, TimestampMixin, Base):
+    """
+    Registered connection metadata for compatible Bluetooth/BLE medical peripherals
+    (e.g., Bluetooth blood pressure monitors, glucose meters, CGMs).
+    """
+    __tablename__ = "device_connections"
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    device_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    device_type: Mapped[str] = mapped_column(String(60), nullable=False)  # "blood_pressure_monitor", "glucose_meter", "cgm", "pulse_monitor"
+    manufacturer: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model_number: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    mac_address: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    connection_protocol: Mapped[str] = mapped_column(String(40), default="bluetooth_le", nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="DISCONNECTED", nullable=False)  # CONNECTED, DISCONNECTED, SYNCING, ERROR
+    battery_level: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    hardware_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<DeviceConnection id={self.id} name='{self.device_name}' type='{self.device_type}' status='{self.status}'>"
+
+
+class DeviceReadingSync(UUIDMixin, TimestampMixin, Base):
+    """
+    Audit log record for synchronizing telemetry from connected medical devices.
+    Guarantees idempotency and prevents duplicate reading insertion.
+    """
+    __tablename__ = "device_reading_syncs"
+
+    patient_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("patients.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    device_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUIDType(),
+        ForeignKey("device_connections.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    device_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    device_identifier: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reading_type: Mapped[str] = mapped_column(String(50), nullable=False)  # "blood_pressure", "glucose", "heart_rate"
+    external_reading_id: Mapped[str | None] = mapped_column(String(100), nullable=True, index=True)
+    reading_hash: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    reading_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), default="SYNCED", nullable=False)  # SYNCED, DUPLICATE_SKIPPED, ERROR
+    measurement_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType(), nullable=True)
+    raw_payload: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
+    device_connection = relationship("DeviceConnection", foreign_keys=[device_connection_id], lazy="selectin")
+
+    def __repr__(self) -> str:
+        return f"<DeviceReadingSync id={self.id} patient_id={self.patient_id} type='{self.reading_type}' status='{self.status}'>"
+
+
 class VitalReminder(UUIDMixin, TimestampMixin, Base):
     """Configurable reminder schedule for patients to record measurements."""
     __tablename__ = "vital_reminders"

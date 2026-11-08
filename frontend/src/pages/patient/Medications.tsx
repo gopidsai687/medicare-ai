@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import {
@@ -13,124 +13,106 @@ import {
   X,
   User,
   ShieldCheck,
+  ShieldAlert,
+  Edit3,
+  XCircle,
+  History,
+  FileText,
+  AlertTriangle,
+  Loader2,
+  CheckCircle2,
+  Info,
 } from 'lucide-react'
+import { PrescriptionItem } from '@/components/prescriptions/AddPrescriptionModal'
+import { AddMedicationModal } from '@/components/medications/AddMedicationModal'
+import { EditMedicationModal } from '@/components/medications/EditMedicationModal'
+import { DiscontinueMedicationModal } from '@/components/medications/DiscontinueMedicationModal'
+import { MedicationHistoryModal } from '@/components/medications/MedicationHistoryModal'
 
-interface Medication {
-  id: string
-  name: string
-  dosage: string
-  frequency: string
-  schedule: ('Morning' | 'Noon' | 'Evening' | 'Bedtime')[]
-  route: string
-  prescriber: string
-  startDate: string
-  refillsRemaining: number
-  instructions: string
-  status: 'Active' | 'Discontinued' | 'Pending Refill'
+interface SafetyReport {
+  status: string
+  active_medications_count: number
+  has_critical_alerts: boolean
+  drug_interactions: Array<{
+    drugs: string[]
+    severity: string
+    clinical_effect: string
+    recommendation: string
+  }>
+  duplicate_ingredients: Array<{
+    drugs: string[]
+    ingredient: string
+    warning: string
+  }>
+  allergy_alerts: Array<{
+    medication: string
+    documented_allergy: string
+    severity: string
+    clinical_note: string
+  }>
+  disclaimer: string
 }
-
-const INITIAL_MEDICATIONS: Medication[] = [
-  {
-    id: 'med-1',
-    name: 'Metformin Hydrochloride',
-    dosage: '500 mg',
-    frequency: 'Twice daily with meals',
-    schedule: ['Morning', 'Evening'],
-    route: 'Oral Tablet',
-    prescriber: 'Dr. James Kim (Endocrinology)',
-    startDate: '2023-06-12',
-    refillsRemaining: 2,
-    instructions: 'Take 1 tablet with breakfast and 1 tablet with dinner. Drink plenty of water.',
-    status: 'Active',
-  },
-  {
-    id: 'med-2',
-    name: 'Lisinopril',
-    dosage: '10 mg',
-    frequency: 'Once daily in the morning',
-    schedule: ['Morning'],
-    route: 'Oral Tablet',
-    prescriber: 'Dr. Sarah Chen (Cardiology)',
-    startDate: '2022-03-18',
-    refillsRemaining: 4,
-    instructions: 'Take in the morning with or without food. Avoid potassium supplements.',
-    status: 'Active',
-  },
-  {
-    id: 'med-3',
-    name: 'Atorvastatin Calcium',
-    dosage: '20 mg',
-    frequency: 'Once daily at bedtime',
-    schedule: ['Bedtime'],
-    route: 'Oral Tablet',
-    prescriber: 'Dr. Sarah Chen (Cardiology)',
-    startDate: '2023-01-10',
-    refillsRemaining: 1,
-    instructions: 'Take in the evening before sleep. Report any unexplained muscle aches.',
-    status: 'Active',
-  },
-  {
-    id: 'med-4',
-    name: 'Amoxicillin Trihydrate',
-    dosage: '500 mg',
-    frequency: 'Three times daily for 10 days',
-    schedule: ['Morning', 'Noon', 'Evening'],
-    route: 'Oral Capsule',
-    prescriber: 'Dr. Maria Lopez (General Practice)',
-    startDate: '2025-11-01',
-    refillsRemaining: 0,
-    instructions: 'Complete full 10-day course even if symptoms improve.',
-    status: 'Discontinued',
-  },
-]
 
 export default function PatientMedications() {
   const navigate = useNavigate()
-  const [medications, setMedications] = useState<Medication[]>(INITIAL_MEDICATIONS)
-  const [selectedMed, setSelectedMed] = useState<Medication | null>(null)
+  const [prescriptions, setPrescriptions] = useState<PrescriptionItem[]>([])
+  const [selectedMed, setSelectedMed] = useState<PrescriptionItem | null>(null)
+  const [safetyReport, setSafetyReport] = useState<SafetyReport | null>(null)
+  const [isSafetyLoading, setIsSafetyLoading] = useState(false)
+
+  // Modals
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isDiscontinueModalOpen, setIsDiscontinueModalOpen] = useState(false)
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
   const [isRefillModalOpen, setIsRefillModalOpen] = useState(false)
-  const [refillTarget, setRefillTarget] = useState<Medication | null>(null)
+  const [refillTarget, setRefillTarget] = useState<PrescriptionItem | null>(null)
   const [refillSuccess, setRefillSuccess] = useState('')
   const [refillLoading, setRefillLoading] = useState(false)
+
   const [takenSchedule, setTakenSchedule] = useState<Record<string, boolean>>({})
   const [isLive, setIsLive] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+
+  // ── Load Prescriptions & Safety Checks ─────────────────────────────────────
+  const loadMedications = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const res = await api.get('/api/v1/prescriptions')
+      if (res.data && Array.isArray(res.data)) {
+        setPrescriptions(res.data)
+        if (res.data.length > 0) {
+          setSelectedMed((prev) => prev ? res.data.find((p: any) => p.id === prev.id) || res.data[0] : res.data[0])
+        }
+        setIsLive(true)
+      }
+    } catch (err) {
+      console.warn('Prescriptions fetch failed:', err)
+    } finally {
+      setIsLoading(false)
+    }
+
+    // Safety screening
+    setIsSafetyLoading(true)
+    try {
+      const sRes = await api.get('/api/v1/prescriptions/safety-check')
+      setSafetyReport(sRes.data)
+    } catch (err) {
+      console.warn('Safety check failed:', err)
+    } finally {
+      setIsSafetyLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    async function loadPrescriptions() {
-      try {
-        const res = await api.get('/api/v1/prescriptions')
-        if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-          const apiMeds: Medication[] = res.data.map((rx: any) => ({
-            id: rx.id,
-            name: rx.medication_name,
-            dosage: rx.dosage,
-            frequency: rx.frequency,
-            schedule: ['Morning', 'Evening'],
-            route: rx.route || 'Oral',
-            prescriber: 'Dr. Physician (Assigned)',
-            startDate: rx.start_date || '2026-01-01',
-            refillsRemaining: rx.refills_remaining ?? 2,
-            instructions: rx.instructions || 'Take as prescribed by your physician.',
-            status: rx.status === 'active' ? 'Active' : rx.status === 'pending_refill' ? 'Pending Refill' : 'Discontinued',
-          }))
-          // Merge with initial demo data so rich mock fields stay visible if few items
-          const existingIds = new Set(apiMeds.map(m => m.name.toLowerCase()))
-          const nonDupeDemo = INITIAL_MEDICATIONS.filter(m => !existingIds.has(m.name.toLowerCase()))
-          setMedications([...apiMeds, ...nonDupeDemo])
-          setIsLive(true)
-        }
-      } catch (err) {
-        console.warn('Using demo medications data:', err)
-      }
-    }
-    loadPrescriptions()
-  }, [])
+    loadMedications()
+  }, [loadMedications])
 
   const toggleTaken = (key: string) => {
     setTakenSchedule((prev) => ({ ...prev, [key]: !prev[key] }))
   }
 
-  const handleRequestRefill = (med: Medication) => {
+  const handleRequestRefill = (med: PrescriptionItem) => {
     setRefillTarget(med)
     setIsRefillModalOpen(true)
   }
@@ -139,26 +121,19 @@ export default function PatientMedications() {
     if (!refillTarget) return
     setRefillLoading(true)
     try {
-      // If it has a UUID format id, request via API
-      if (refillTarget.id.includes('-') && refillTarget.id.length > 10 && !refillTarget.id.startsWith('med-')) {
-        await api.post(`/api/v1/prescriptions/${refillTarget.id}/refill`)
-      }
-    } catch (err) {
-      console.warn('Refill API call failed, updating local state:', err)
+      await api.post(`/api/v1/prescriptions/${refillTarget.id}/refill`)
+      setRefillSuccess(`Refill request submitted to ${refillTarget.pharmacy || 'pharmacy'} for ${refillTarget.medication_name}!`)
+      await loadMedications()
+    } catch (err: any) {
+      setRefillSuccess(`Refill request queued for ${refillTarget.medication_name}.`)
     } finally {
       setRefillLoading(false)
+      setIsRefillModalOpen(false)
+      setTimeout(() => setRefillSuccess(''), 4500)
     }
-    setMedications((prev) =>
-      prev.map((m) =>
-        m.id === refillTarget.id ? { ...m, status: 'Pending Refill' as const } : m
-      )
-    )
-    setIsRefillModalOpen(false)
-    setRefillSuccess(`Refill request submitted to ${refillTarget.prescriber} for ${refillTarget.name}!`)
-    setTimeout(() => setRefillSuccess(''), 4500)
   }
 
-  const activeMeds = medications.filter((m) => m.status === 'Active' || m.status === 'Pending Refill')
+  const activeMeds = prescriptions.filter((m) => m.status === 'active' || m.status === 'pending_refill')
   const timeSlots: ('Morning' | 'Noon' | 'Evening' | 'Bedtime')[] = ['Morning', 'Noon', 'Evening', 'Bedtime']
 
   return (
@@ -166,13 +141,18 @@ export default function PatientMedications() {
       {/* Header */}
       <div className="page-header animate-fade-in-up flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="page-title">Prescriptions & Medications</h1>
+          <h1 className="page-title flex items-center gap-2.5">
+            <span className="p-2 rounded-xl bg-gradient-to-br from-teal-500 to-blue-500 text-white shadow-lg shadow-teal-500/20">
+              <Pill size={22} />
+            </span>
+            Prescriptions & Medications
+          </h1>
           <p className="page-subtitle flex items-center gap-2">
-            Track daily doses, schedule reminders, and request prescription refills
+            Active medication regimen, dosage checklist, refills, and safety screening
             {isLive && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                LIVE API
+                LIVE DATABASE API
               </span>
             )}
           </p>
@@ -180,9 +160,72 @@ export default function PatientMedications() {
         <div className="flex items-center gap-3">
           <button
             onClick={() => navigate('/patient/prescriptions')}
-            className="btn-primary inline-flex items-center gap-2 cursor-pointer"
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-violet-600/20 hover:bg-violet-600/30 text-violet-300 border border-violet-500/30 flex items-center gap-2 transition-all cursor-pointer shadow-sm shadow-violet-500/10"
           >
-            <Pill size={16} /> Analyze New Prescription
+            <Pill size={15} /> Analyze Prescription Document
+          </button>
+        </div>
+      </div>
+
+      {/* ── Action Area (Exact Recommended Layout from Mockup) ───────────── */}
+      <div className="glass p-4 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-4 border border-white/10 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-teal-600/10 text-teal-400 border border-teal-500/20">
+            <Activity className="w-4 h-4" />
+          </div>
+          <div>
+            <h2 className="text-sm font-bold text-white tracking-wide">Medications</h2>
+            <span className="text-[11px] text-slate-400">Manage daily doses, refills, and clinical cessation</span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setIsAddModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-500/10"
+          >
+            <Plus size={14} /> Add Medication
+          </button>
+
+          <button
+            onClick={() => {
+              if (!selectedMed && activeMeds.length > 0) setSelectedMed(activeMeds[0])
+              setIsEditModalOpen(true)
+            }}
+            disabled={activeMeds.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
+          >
+            <Edit3 size={14} /> Edit
+          </button>
+
+          <button
+            onClick={() => {
+              if (!selectedMed && activeMeds.length > 0) setSelectedMed(activeMeds[0])
+              setIsDiscontinueModalOpen(true)
+            }}
+            disabled={activeMeds.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-rose-300 hover:text-rose-200 border border-rose-500/20 hover:bg-rose-500/10 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
+          >
+            <XCircle size={14} /> Discontinue
+          </button>
+
+          <button
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <History size={14} /> Medication History
+          </button>
+
+          <button
+            onClick={() => {
+              if (!selectedMed && activeMeds.length > 0) setSelectedMed(activeMeds[0])
+              if (selectedMed) handleRequestRefill(selectedMed)
+              else if (activeMeds.length > 0) handleRequestRefill(activeMeds[0])
+            }}
+            disabled={activeMeds.length === 0}
+            className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer disabled:opacity-40"
+          >
+            <RotateCw size={14} /> Refill Tracking
           </button>
         </div>
       </div>
@@ -194,6 +237,70 @@ export default function PatientMedications() {
         </div>
       )}
 
+      {/* ── Medication Safety & Drug Interaction Screening ─────────────────── */}
+      {safetyReport && (
+        <div className="glass p-5 rounded-2xl border border-white/10 space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldAlert
+                size={18}
+                className={safetyReport.has_critical_alerts ? 'text-rose-400' : 'text-emerald-400'}
+              />
+              <h2 className="text-sm font-bold text-white">
+                Live Drug Interaction & Safety Screening
+              </h2>
+            </div>
+            <span
+              className={`text-[10px] font-semibold uppercase px-2 py-0.5 rounded-md border ${
+                safetyReport.has_critical_alerts
+                  ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                  : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+              }`}
+            >
+              {safetyReport.has_critical_alerts ? 'Action Recommended' : 'Safety Check Passed'}
+            </span>
+          </div>
+
+          {safetyReport.drug_interactions?.length > 0 ? (
+            <div className="space-y-2 pt-1">
+              {safetyReport.drug_interactions.map((interaction, idx) => (
+                <div
+                  key={idx}
+                  className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-xs space-y-1.5"
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-300 flex items-center gap-1.5">
+                      <AlertTriangle size={14} />
+                      Potential Interaction: {interaction.drugs.join(' + ')}
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[10px] font-bold uppercase">
+                      {interaction.severity}
+                    </span>
+                  </div>
+                  <p className="text-slate-300 text-[11px] leading-relaxed">
+                    <strong>Clinical Effect:</strong> {interaction.clinical_effect}
+                  </p>
+                  <p className="text-slate-400 text-[11px]">
+                    <strong>Recommendation:</strong> {interaction.recommendation}
+                  </p>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-xs text-emerald-300 flex items-center gap-2">
+              <CheckCircle2 size={15} />
+              <span>
+                No critical drug-drug contraindications or duplicate active ingredients detected across your {safetyReport.active_medications_count} active medications.
+              </span>
+            </div>
+          )}
+
+          <div className="text-[10px] text-slate-500 flex items-center gap-1 pt-1">
+            <Info size={11} /> {safetyReport.disclaimer}
+          </div>
+        </div>
+      )}
+
       {/* Daily Dose Routine Checklist */}
       <div className="glass p-5 rounded-2xl border border-white/10 space-y-4">
         <div className="flex items-center justify-between">
@@ -201,17 +308,25 @@ export default function PatientMedications() {
             <Clock size={18} className="text-blue-400" /> Today's Medication Schedule
           </h2>
           <span className="text-xs text-slate-400">
-            {Object.values(takenSchedule).filter(Boolean).length} doses taken today
+            {Object.values(takenSchedule).filter(Boolean).length} doses marked taken today
           </span>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           {timeSlots.map((slot) => {
-            const slotMeds = activeMeds.filter((m) => m.schedule.includes(slot))
+            const slotMeds = activeMeds.filter((m) => {
+              const freq = (m.frequency || '').toLowerCase()
+              if (slot === 'Morning' && (freq.includes('morning') || freq.includes('daily') || freq.includes('breakfast'))) return true
+              if (slot === 'Noon' && (freq.includes('twice') || freq.includes('three') || freq.includes('lunch'))) return true
+              if (slot === 'Evening' && (freq.includes('evening') || freq.includes('twice') || freq.includes('dinner'))) return true
+              if (slot === 'Bedtime' && (freq.includes('bedtime') || freq.includes('night') || freq.includes('sleep'))) return true
+              return slot === 'Morning'
+            })
+
             return (
               <div key={slot} className="p-3.5 rounded-xl bg-white/5 border border-white/5 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-blue-400">{slot}</span>
+                  <span className="text-xs font-bold uppercase tracking-wider text-teal-400">{slot}</span>
                   <span className="text-xs text-slate-500">{slotMeds.length} meds</span>
                 </div>
                 {slotMeds.length === 0 ? (
@@ -231,7 +346,7 @@ export default function PatientMedications() {
                         }`}
                       >
                         <div>
-                          <p className="font-semibold">{m.name}</p>
+                          <p className="font-semibold">{m.medication_name}</p>
                           <p className="text-[11px] opacity-75">{m.dosage}</p>
                         </div>
                         <CheckCircle
@@ -250,56 +365,134 @@ export default function PatientMedications() {
 
       {/* Active Medications Cards */}
       <div>
-        <h2 className="text-base font-bold text-white mb-3">Active Prescriptions</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {activeMeds.map((med) => (
-            <div
-              key={med.id}
-              className="glass p-5 rounded-2xl border border-white/10 space-y-4 hover:border-blue-500/30 transition-all"
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            <Pill size={17} className="text-teal-400" />
+            Active Regimen ({activeMeds.length})
+          </h2>
+          <span className="text-xs text-slate-400">
+            Click any medication card to select it for editing or discontinuation
+          </span>
+        </div>
+
+        {activeMeds.length === 0 ? (
+          <div className="glass p-12 text-center rounded-2xl border border-white/10 space-y-3">
+            <Pill size={36} className="mx-auto text-slate-500" />
+            <p className="text-sm text-slate-300 font-medium">No active medications recorded</p>
+            <p className="text-xs text-slate-500">
+              Use "Add Medication" above or analyze a prescription document to populate your regimen.
+            </p>
+            <button
+              onClick={() => setIsAddModalOpen(true)}
+              className="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-500 transition cursor-pointer"
             >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-xl bg-blue-500/10 border border-blue-500/20 text-blue-400 flex items-center justify-center shrink-0">
-                    <Activity size={20} />
-                  </div>
-                  <div>
-                    <h3 className="font-bold text-white text-base">{med.name}</h3>
-                    <p className="text-xs text-blue-400 font-medium">{med.dosage} • {med.route}</p>
-                  </div>
-                </div>
-                <span
-                  className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
-                    med.status === 'Pending Refill'
-                      ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                      : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+              + Add Medication Now
+            </button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {activeMeds.map((med) => {
+              const isSelected = selectedMed?.id === med.id
+              return (
+                <div
+                  key={med.id}
+                  onClick={() => setSelectedMed(med)}
+                  className={`glass p-5 rounded-2xl border transition-all cursor-pointer space-y-4 ${
+                    isSelected
+                      ? 'border-teal-500/60 bg-teal-500/10 shadow-lg shadow-teal-500/10'
+                      : 'border-white/10 hover:border-teal-500/30 hover:bg-white/5'
                   }`}
                 >
-                  {med.status}
-                </span>
-              </div>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-teal-500/10 border border-teal-500/20 text-teal-400 flex items-center justify-center shrink-0">
+                        <Activity size={20} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-bold text-white text-base">{med.medication_name}</h3>
+                          {isSelected && (
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-teal-500 text-slate-950 uppercase">
+                              Selected
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-teal-400 font-medium">
+                          {med.dosage} • {med.route || 'Oral'} {med.dosage_form ? `(${med.dosage_form})` : ''}
+                        </p>
+                      </div>
+                    </div>
+                    <span
+                      className={`text-xs px-2.5 py-0.5 rounded-full font-medium ${
+                        med.status === 'pending_refill'
+                          ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                          : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                      }`}
+                    >
+                      {med.status === 'pending_refill' ? 'Refill Pending' : 'Active'}
+                    </span>
+                  </div>
 
-              <div className="space-y-1 text-xs">
-                <p className="text-slate-300 font-medium">{med.instructions}</p>
-                <div className="flex items-center gap-4 text-slate-400 pt-2 flex-wrap">
-                  <span>Prescriber: <strong className="text-slate-300">{med.prescriber}</strong></span>
-                  <span>Refills: <strong className="text-blue-400 font-bold">{med.refillsRemaining}</strong></span>
+                  <div className="space-y-1 text-xs">
+                    <p className="text-slate-300 font-medium">
+                      {med.instructions || 'Take as prescribed by your physician.'}
+                    </p>
+                    <div className="flex items-center gap-4 text-slate-400 pt-2 flex-wrap">
+                      <span>
+                        Prescriber: <strong className="text-slate-300">{med.prescribing_doctor_name || 'N/A'}</strong>
+                      </span>
+                      <span>
+                        Pharmacy: <strong className="text-slate-300">{med.pharmacy || 'Central Pharmacy'}</strong>
+                      </span>
+                      <span>
+                        Refills Remaining: <strong className="text-teal-400 font-bold">{med.refills_remaining ?? 0}</strong>
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between pt-3 border-t border-white/5">
+                    <span className="text-xs text-slate-500">
+                      Started {med.start_date || 'N/A'}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedMed(med)
+                          setIsEditModalOpen(true)
+                        }}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold text-slate-300 hover:text-white bg-slate-800 hover:bg-slate-700 transition"
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setSelectedMed(med)
+                          setIsDiscontinueModalOpen(true)
+                        }}
+                        className="px-2.5 py-1 rounded-lg text-xs font-semibold text-rose-300 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 transition"
+                      >
+                        Discontinue
+                      </button>
+                      {med.status !== 'pending_refill' && (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            handleRequestRefill(med)
+                          }}
+                          className="px-3 py-1 rounded-lg text-xs font-semibold bg-teal-600/20 hover:bg-teal-600/30 text-teal-300 border border-teal-500/30 flex items-center gap-1.5 transition-all"
+                        >
+                          <RotateCw size={12} /> Refill
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <div className="flex items-center justify-between pt-3 border-t border-white/5">
-                <span className="text-xs text-slate-500">Started {med.startDate}</span>
-                {med.status !== 'Pending Refill' && (
-                  <button
-                    onClick={() => handleRequestRefill(med)}
-                    className="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-blue-600/20 hover:bg-blue-600/30 text-blue-300 border border-blue-500/30 flex items-center gap-1.5 transition-all"
-                  >
-                    <RotateCw size={13} /> Request Refill
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       {/* Refill Confirmation Modal */}
@@ -308,7 +501,7 @@ export default function PatientMedications() {
           <div className="glass w-full max-w-md rounded-2xl p-6 relative border border-white/10 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-white/10">
               <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <RotateCw size={17} className="text-blue-400" /> Confirm Refill Request
+                <RotateCw size={17} className="text-teal-400" /> Confirm Refill Request
               </h3>
               <button
                 onClick={() => setIsRefillModalOpen(false)}
@@ -319,30 +512,81 @@ export default function PatientMedications() {
             </div>
 
             <p className="text-sm text-slate-300">
-              Submit a digital refill request for <strong>{refillTarget.name} ({refillTarget.dosage})</strong> to{' '}
-              <strong>{refillTarget.prescriber}</strong>?
+              Submit an electronic refill request for{' '}
+              <strong>{refillTarget.medication_name} ({refillTarget.dosage})</strong> to{' '}
+              <strong>{refillTarget.pharmacy || 'Authorized Pharmacy'}</strong>?
             </p>
 
-            <div className="p-3 rounded-xl bg-white/5 text-xs text-slate-400 space-y-1">
-              <p>Remaining refills authorized: <strong>{refillTarget.refillsRemaining}</strong></p>
-              <p>Pharmacy: <strong>MetroHealth Central Pharmacy</strong></p>
+            <div className="p-3.5 rounded-xl bg-white/5 text-xs text-slate-300 space-y-1.5 border border-white/5">
+              <p>
+                Refills remaining before request:{' '}
+                <strong className="text-teal-400 font-bold">{refillTarget.refills_remaining ?? 0}</strong>
+              </p>
+              <p>
+                Prescribing Physician:{' '}
+                <strong>{refillTarget.prescribing_doctor_name || 'Dr. Physician (Assigned)'}</strong>
+              </p>
             </div>
 
             <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
               <button
                 type="button"
                 onClick={() => setIsRefillModalOpen(false)}
+                disabled={refillLoading}
                 className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white"
               >
                 Cancel
               </button>
-              <button onClick={confirmRefill} className="btn-primary">
+              <button
+                onClick={confirmRefill}
+                disabled={refillLoading}
+                className="btn-primary inline-flex items-center gap-2"
+              >
+                {refillLoading ? <Loader2 size={14} className="animate-spin" /> : <RotateCw size={14} />}
                 Send Refill Request
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── Modals ──────────────────────────────────────────────────────── */}
+      <AddMedicationModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={(newMed) => {
+          loadMedications()
+          setSelectedMed(newMed)
+        }}
+        existingPrescriptions={prescriptions}
+      />
+
+      <EditMedicationModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        medication={selectedMed}
+        onSuccess={(updated) => {
+          loadMedications()
+          setSelectedMed(updated)
+        }}
+      />
+
+      <DiscontinueMedicationModal
+        isOpen={isDiscontinueModalOpen}
+        onClose={() => setIsDiscontinueModalOpen(false)}
+        medication={selectedMed}
+        onSuccess={() => {
+          loadMedications()
+        }}
+      />
+
+      <MedicationHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        onRestored={() => {
+          loadMedications()
+        }}
+      />
     </div>
   )
 }

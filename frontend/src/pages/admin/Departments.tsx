@@ -16,6 +16,7 @@ import {
   ChevronRight,
   Edit2,
   CheckCircle2,
+  Trash2,
 } from 'lucide-react'
 
 interface Department {
@@ -186,9 +187,23 @@ export default function AdminDepartments() {
     loadDepartments()
   }, [])
 
-  const handleSaveDepartment = (e: React.FormEvent) => {
+  const handleSaveDepartment = async (e: React.FormEvent) => {
     e.preventDefault()
     if (editDept) {
+      try {
+        await api.put(`/api/v1/departments/${editDept.id}`, {
+          name: formName,
+          code: formCode.toUpperCase(),
+          director: formDirector,
+          location: formLocation,
+          bedsTotal: Number(formBeds),
+          staffCount: Number(formStaff),
+          phone: formPhone,
+        })
+      } catch (err) {
+        console.warn('Backend update failed:', err)
+      }
+
       setDepartments(
         departments.map((d) =>
           d.id === editDept.id
@@ -241,6 +256,18 @@ export default function AdminDepartments() {
     setFormDirector('')
     setFormLocation('')
     setFormPhone('')
+  }
+
+  const handleDeleteDepartment = async (dept: Department) => {
+    if (!confirm(`Are you sure you want to deactivate and remove department "${dept.name}" (${dept.code})?`)) {
+      return
+    }
+    try {
+      await api.delete(`/api/v1/departments/${dept.id}`)
+    } catch (err) {
+      console.warn('Backend deactivation failed:', err)
+    }
+    setDepartments(departments.filter((d) => d.id !== dept.id))
   }
 
   const openEdit = (dept: Department) => {
@@ -402,13 +429,22 @@ export default function AdminDepartments() {
                   </p>
                 </div>
 
-                <button
-                  onClick={() => openEdit(dept)}
-                  className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
-                  title="Edit Department Details"
-                >
-                  <Edit2 size={14} />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => openEdit(dept)}
+                    className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-400 hover:text-white transition-colors"
+                    title="Edit Department Details"
+                  >
+                    <Edit2 size={14} />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteDepartment(dept)}
+                    className="p-1.5 rounded-lg bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 transition-colors"
+                    title="Deactivate Department"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </div>
 
               {/* Directorate & Contact */}

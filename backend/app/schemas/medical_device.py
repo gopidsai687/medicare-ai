@@ -52,6 +52,8 @@ class MedicalDeviceRead(MedicalDeviceBase):
     bp_calibration_expiry: Optional[datetime] = None
     last_heartbeat_at: Optional[datetime] = None
     last_reading_at: Optional[datetime] = None
+    last_connected_at: Optional[datetime] = None
+    connection_protocol_details: Optional[str] = None
     mac_or_device_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -59,12 +61,30 @@ class MedicalDeviceRead(MedicalDeviceBase):
     model_config = {"from_attributes": True}
 
 
+class DeviceConnectionStatusUpdate(BaseModel):
+    status: str = Field(..., description="CONNECTED, DISCONNECTED, CONNECTING, CONNECTION_FAILED, SIMULATION_MODE")
+    protocol_details: Optional[str] = None
+    failure_reason: Optional[str] = None
+
+
+class DeviceConnectionEventRead(BaseModel):
+    id: uuid.UUID
+    device_id: uuid.UUID
+    event_type: str
+    details: Optional[str] = None
+    source_ip: Optional[str] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
 class TelemetryIngestRequest(BaseModel):
     """
     Direct ingestion payload from physical device or adapter.
-    Enforces rigorous validation bounds and rejects unverified claims.
+    Enforces rigorous validation bounds, cryptographic HMAC authentication, and rejects unverified claims.
     """
     timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    sequence_number: Optional[int] = Field(None, ge=1, description="Strictly monotonically increasing packet sequence number")
     heart_rate: Optional[int] = Field(None, ge=30, le=250, description="Direct pulse rate in bpm")
     oxygen_saturation: Optional[float] = Field(None, ge=70.0, le=100.0, description="Oxygen saturation SpO2 %")
     perfusion_index: Optional[float] = Field(None, ge=0.01, le=25.0, description="Perfusion index AC/DC %")
@@ -77,8 +97,11 @@ class TelemetryIngestRequest(BaseModel):
     
     signal_quality: str = Field("OPTIMAL", description="Signal quality indicator")
     snr_db: Optional[float] = Field(None, description="Signal-to-noise ratio in dB")
+    sensor_status: Optional[str] = Field("SENSOR_OK", description="Hardware sensor status: SENSOR_OK, LEADS_OFF, FAULT")
+    source_type: str = Field("HARDWARE", description="Measurement source: HARDWARE or SIMULATION")
     provenance: str = Field("MEASURED_DEVICE", description="Source attribution provenance")
-    packet_hash: Optional[str] = Field(None, description="Cryptographic packet hash or sequence")
+    packet_hash: Optional[str] = Field(None, description="SHA-256 packet payload integrity checksum")
+    auth_signature: Optional[str] = Field(None, max_length=128, description="HMAC-SHA256 message authentication code (MAC)")
     is_sample: bool = Field(False, description="Whether this is synthetic demo data")
 
     @field_validator("timestamp")
@@ -111,6 +134,7 @@ class DeviceTelemetryPacketRead(BaseModel):
     device_id: uuid.UUID
     patient_id: uuid.UUID
     packet_timestamp: datetime
+    sequence_number: Optional[int] = None
     heart_rate: Optional[int] = None
     oxygen_saturation: Optional[float] = None
     perfusion_index: Optional[float] = None
@@ -121,8 +145,12 @@ class DeviceTelemetryPacketRead(BaseModel):
     blood_glucose: Optional[float] = None
     signal_quality: str
     snr_db: Optional[float] = None
+    sensor_status: Optional[str] = "SENSOR_OK"
+    source_type: str = "HARDWARE"
     provenance: str
     packet_hash: str
+    auth_signature: Optional[str] = None
+    auth_verified: bool = False
     is_sample: bool
     validation_status: str
     validation_notes: Optional[str] = None
@@ -133,11 +161,17 @@ class DeviceTelemetryPacketRead(BaseModel):
 
 class DeviceSimulatorRequest(BaseModel):
     """Configuration for physical hardware simulator (DEMO ONLY)."""
-    scenario: str = Field("optimal_pulse", description="optimal_pulse, high_pressure, motion_noise, uncalibrated_bp_attempt, glucose_rejection_test")
+    scenario: str = Field("optimal_pulse", description="optimal_pulse, high_pressure, motion_noise, low_perfusion, sensor_failure, packet_loss, corrupted_signature, calibration_expired")
     device_id: Optional[uuid.UUID] = None
     pulse_bpm: Optional[int] = Field(72, ge=40, le=180)
     spo2_pct: Optional[float] = Field(98.5, ge=80.0, le=100.0)
     contact_force_n: Optional[float] = Field(1.2, ge=0.1, le=5.0)
+    temperature_c: Optional[float] = Field(34.2, ge=20.0, le=44.0)
+    perfusion_index_pct: Optional[float] = Field(2.4, ge=0.01, le=25.0)
+    sensor_leads_connected: Optional[bool] = Field(True, description="Toggle whether physical biosensor leads are attached")
+    inject_bad_signature: Optional[bool] = Field(False, description="Simulate cryptographic tamper or corrupted HMAC signature")
+    inject_packet_loss: Optional[bool] = Field(False, description="Simulate skipped sequence numbers (packet loss)")
+    force_calibration_expired: Optional[bool] = Field(False, description="Simulate expired BP calibration status")
 
 
 class DeviceCalibrationRequest(BaseModel):

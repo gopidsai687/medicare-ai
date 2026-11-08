@@ -1,10 +1,9 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import api from '@/lib/api'
 import {
   FileText,
   Search,
-  Filter,
   Download,
   Plus,
   X,
@@ -18,193 +17,148 @@ import {
   Calendar,
   User,
   Info,
+  Clock,
+  Edit2,
+  Archive,
+  RefreshCw,
+  ExternalLink,
+  ShieldCheck,
+  UserCheck,
+  FlaskConical,
+  ClipboardList,
 } from 'lucide-react'
 import { useToast } from '@/lib/toast'
-
-interface MedicalRecordItem {
-  id: string
-  category: 'Diagnosis' | 'Allergy' | 'Surgery' | 'Immunization' | 'Document'
-  title: string
-  icd10?: string
-  date: string
-  provider: string
-  status: 'Active' | 'Resolved' | 'Chronic' | 'Verified'
-  severity?: 'Mild' | 'Moderate' | 'Severe' | 'Critical'
-  description: string
-  notes?: string
-}
-
-const INITIAL_RECORDS: MedicalRecordItem[] = [
-  {
-    id: 'rec-1',
-    category: 'Diagnosis',
-    title: 'Type 2 Diabetes Mellitus',
-    icd10: 'E11.9',
-    date: '2023-06-12',
-    provider: 'Dr. James Kim (Endocrinology)',
-    status: 'Chronic',
-    severity: 'Moderate',
-    description: 'Managed with Metformin 500mg BID and dietary interventions. Target HbA1c < 7.0%.',
-    notes: 'Patient advised to monitor blood glucose twice weekly and maintain low glycemic diet.',
-  },
-  {
-    id: 'rec-2',
-    category: 'Diagnosis',
-    title: 'Essential Hypertension — Stage 1',
-    icd10: 'I10',
-    date: '2022-03-18',
-    provider: 'Dr. Sarah Chen (Cardiology)',
-    status: 'Active',
-    severity: 'Mild',
-    description: 'Controlled on Lisinopril 10mg daily. Ambulatory BP monitoring recommended every 6 months.',
-    notes: 'Average home readings 128/82 mmHg.',
-  },
-  {
-    id: 'rec-3',
-    category: 'Allergy',
-    title: 'Penicillin & Amoxicillin',
-    date: '2015-05-20',
-    provider: 'Dr. Maria Lopez (General Practice)',
-    status: 'Active',
-    severity: 'Severe',
-    description: 'Hives, angioedema, and airway tightness upon ingestion. Cross-reactivity warning active.',
-    notes: 'Prescribe cephalosporins with caution or alternative macrolide antibiotics.',
-  },
-  {
-    id: 'rec-4',
-    category: 'Surgery',
-    title: 'Laparoscopic Appendectomy',
-    date: '2019-01-14',
-    provider: 'Dr. Robert Patel (General Surgery)',
-    status: 'Resolved',
-    description: 'Uncomplicated acute appendicitis. Three-port laparoscopic resection without rupture.',
-    notes: 'Post-operative recovery uneventful. Incisions fully healed.',
-  },
-  {
-    id: 'rec-5',
-    category: 'Immunization',
-    title: 'Influenza Vaccine (Quadrivalent)',
-    date: '2025-10-10',
-    provider: 'MetroHealth Pharmacy Clinic',
-    status: 'Verified',
-    description: 'Annual seasonal flu prophylaxis. Lot #FL-88912.',
-    notes: 'No adverse reactions noted post 15-minute observation.',
-  },
-  {
-    id: 'rec-6',
-    category: 'Immunization',
-    title: 'COVID-19 Updated Booster (mRNA)',
-    date: '2025-09-02',
-    provider: 'MetroHealth Main Clinic',
-    status: 'Verified',
-    description: 'Monovalent spike antigen booster. Lot #CV-39210.',
-    notes: 'Mild localized arm soreness for 24 hours.',
-  },
-]
+import { AddRecordModal, MedicalRecordData } from '@/components/records/AddRecordModal'
+import { EditRecordModal } from '@/components/records/EditRecordModal'
+import { DeleteRecordModal } from '@/components/records/DeleteRecordModal'
+import { RecordHistoryModal } from '@/components/records/RecordHistoryModal'
+import { ClearRecordHistoryModal } from '@/components/records/ClearRecordHistoryModal'
 
 export default function PatientMedicalRecords() {
   const navigate = useNavigate()
-  const { success } = useToast()
-  const [records, setRecords] = useState<MedicalRecordItem[]>(INITIAL_RECORDS)
+  const { success, error: toastError } = useToast()
+  const [records, setRecords] = useState<MedicalRecordData[]>([])
   const [selectedCategory, setSelectedCategory] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedRecord, setSelectedRecord] = useState<MedicalRecordItem | null>(null)
-  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState<MedicalRecordData | null>(null)
   const [isLive, setIsLive] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [showArchived, setShowArchived] = useState(false)
 
-  // New record form state
-  const [newCategory, setNewCategory] = useState<MedicalRecordItem['category']>('Diagnosis')
-  const [newTitle, setNewTitle] = useState('')
-  const [newDate, setNewDate] = useState('2026-09-22')
-  const [newProvider, setNewProvider] = useState('')
-  const [newDescription, setNewDescription] = useState('')
+  // Modals state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [recordToEdit, setRecordToEdit] = useState<MedicalRecordData | null>(null)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [recordToDelete, setRecordToDelete] = useState<MedicalRecordData | null>(null)
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false)
+  const [isClearModalOpen, setIsClearModalOpen] = useState(false)
+
+  const loadRecords = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const res = await api.get('/api/v1/records', {
+        params: {
+          include_archived: showArchived,
+        },
+      })
+      if (res.data && Array.isArray(res.data)) {
+        setRecords(res.data)
+        setIsLive(true)
+      }
+    } catch (err) {
+      console.warn('Could not load medical records from backend API:', err)
+      toastError('Connection Notice', 'Unable to reach medical records service. Displaying cached records.')
+    } finally {
+      setIsLoading(false)
+    }
+  }, [showArchived, toastError])
 
   useEffect(() => {
-    async function loadRecords() {
-      try {
-        const res = await api.get('/api/v1/records')
-        if (res.data && Array.isArray(res.data) && res.data.length > 0) {
-          const apiRecords: MedicalRecordItem[] = res.data.map((r: any) => ({
-            id: r.id,
-            category: (((r.category || 'general').charAt(0).toUpperCase() + (r.category || 'general').slice(1).toLowerCase())) as any,
-            title: r.title || 'Medical Record',
-            icd10: r.icd10_code || undefined,
-            date: r.record_date || new Date().toISOString().split('T')[0],
-            provider: 'Dr. Physician (Assigned)',
-            status: (((r.status || 'active').charAt(0).toUpperCase() + (r.status || 'active').slice(1).toLowerCase())) as any,
-            severity: 'Moderate',
-            description: r.description || '',
-            notes: r.notes || undefined,
-          }))
-          const existingTitles = new Set(apiRecords.map(r => (r.title || '').toLowerCase()))
-          const nonDupeDemo = INITIAL_RECORDS.filter(r => !existingTitles.has((r.title || '').toLowerCase()))
-          setRecords([...apiRecords, ...nonDupeDemo])
-          setIsLive(true)
-        }
-      } catch (err) {
-        console.warn('Using demo medical records data:', err)
-      }
-    }
     loadRecords()
-  }, [])
+  }, [loadRecords])
 
-  const handleAddRecord = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const rec: MedicalRecordItem = {
-      id: `rec-${Date.now()}`,
-      category: newCategory,
-      title: newTitle,
-      date: newDate,
-      provider: newProvider || 'Self-Reported / Outside Provider',
-      status: newCategory === 'Allergy' || newCategory === 'Diagnosis' ? 'Active' : 'Verified',
-      description: newDescription,
-    }
-
+  const handleExport = async () => {
     try {
-      await api.post('/api/v1/records', {
-        title: newTitle,
-        category: newCategory.toLowerCase(),
-        description: newDescription,
-        record_date: newDate,
-        status: (newCategory === 'Allergy' || newCategory === 'Diagnosis' ? 'active' : 'resolved'),
-      })
+      const res = await api.get('/api/v1/records/export')
+      const blob = new Blob([JSON.stringify(res.data, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `MediCare_Medical_Records_Summary_${new Date().toISOString().split('T')[0]}.json`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      success('Export Completed', 'Official electronic health records summary exported successfully.')
     } catch (err) {
-      console.warn('Failed to save record to API, saved locally:', err)
+      toastError('Export Failed', 'Unable to export health records summary.')
     }
+  }
 
-    setRecords([rec, ...records])
-    setIsAddModalOpen(false)
-    setNewTitle('')
-    setNewProvider('')
-    setNewDescription('')
+  const handleOpenEdit = (rec: MedicalRecordData) => {
+    setRecordToEdit(rec)
+    setIsEditModalOpen(true)
+  }
+
+  const handleOpenArchive = (rec: MedicalRecordData) => {
+    setRecordToDelete(rec)
+    setIsDeleteModalOpen(true)
   }
 
   const filteredRecords = records.filter((r) => {
+    const catCode = (r.category_code || r.category || '').toLowerCase()
     const matchesCat =
-      selectedCategory === 'all' ? true : r.category.toLowerCase() === selectedCategory.toLowerCase()
+      selectedCategory === 'all'
+        ? true
+        : catCode.includes(selectedCategory.toLowerCase()) ||
+          (r.category || '').toLowerCase() === selectedCategory.toLowerCase()
+
     const matchesSearch =
-      r.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      r.provider.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (r.title || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (r.provider || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
       (r.icd10 && r.icd10.toLowerCase().includes(searchQuery.toLowerCase())) ||
-      r.description.toLowerCase().includes(searchQuery.toLowerCase())
+      (r.description || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (r.notes && r.notes.toLowerCase().includes(searchQuery.toLowerCase()))
+
     return matchesCat && matchesSearch
   })
 
   const stats = [
-    { label: 'Active Diagnoses', value: records.filter((r) => r.category === 'Diagnosis' && r.status !== 'Resolved').length, icon: Activity, color: '#3182f4' },
-    { label: 'Allergies Tracked', value: records.filter((r) => r.category === 'Allergy').length, icon: ShieldAlert, color: '#f43f5e' },
-    { label: 'Surgeries Documented', value: records.filter((r) => r.category === 'Surgery').length, icon: Scissors, color: '#10b981' },
-    { label: 'Immunizations', value: records.filter((r) => r.category === 'Immunization').length, icon: Syringe, color: '#8b5cf6' },
+    {
+      label: 'Active Diagnoses',
+      value: records.filter((r) => (r.category_code === 'diagnosis' || r.category === 'Diagnosis') && r.status !== 'Resolved').length,
+      icon: Activity,
+      color: '#3182f4',
+    },
+    {
+      label: 'Allergies Tracked',
+      value: records.filter((r) => r.category_code === 'allergy' || r.category === 'Allergy').length,
+      icon: ShieldAlert,
+      color: '#f43f5e',
+    },
+    {
+      label: 'Surgeries Documented',
+      value: records.filter((r) => r.category_code === 'surgery' || r.category === 'Surgery').length,
+      icon: Scissors,
+      color: '#10b981',
+    },
+    {
+      label: 'Immunizations',
+      value: records.filter((r) => r.category_code === 'immunization' || r.category === 'Immunization').length,
+      icon: Syringe,
+      color: '#8b5cf6',
+    },
   ]
 
-  const getCategoryIcon = (category: MedicalRecordItem['category']) => {
-    switch (category) {
-      case 'Diagnosis': return <Activity size={16} className="text-blue-400" />
-      case 'Allergy': return <ShieldAlert size={16} className="text-rose-400" />
-      case 'Surgery': return <Scissors size={16} className="text-emerald-400" />
-      case 'Immunization': return <Syringe size={16} className="text-purple-400" />
-      default: return <FileText size={16} className="text-slate-400" />
-    }
+  const getCategoryIcon = (category: string) => {
+    const c = (category || '').toLowerCase()
+    if (c.includes('diagnosis')) return <Activity size={15} className="text-blue-400" />
+    if (c.includes('allergy')) return <ShieldAlert size={15} className="text-rose-400" />
+    if (c.includes('surgery')) return <Scissors size={15} className="text-emerald-400" />
+    if (c.includes('immuniz')) return <Syringe size={15} className="text-purple-400" />
+    if (c.includes('lab')) return <FlaskConical size={15} className="text-teal-400" />
+    return <FileText size={15} className="text-slate-400" />
   }
 
   return (
@@ -214,27 +168,155 @@ export default function PatientMedicalRecords() {
         <div>
           <h1 className="page-title">Medical Records</h1>
           <p className="page-subtitle flex items-center gap-2">
-            Your longitudinal electronic health record, diagnoses, and verified history
+            Your longitudinal electronic health record, verified clinical diagnoses, and history
             {isLive && (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                LIVE API
+                LIVE DATABASE API
               </span>
             )}
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
-            onClick={() => success('Download started', 'Your comprehensive PDF health record is being prepared.')}
-            className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 flex items-center gap-2 transition-all"
+            onClick={() => navigate('/patient/labs')}
+            className="px-4 py-2.5 rounded-xl text-xs font-semibold bg-teal-500/10 hover:bg-teal-500/20 text-teal-300 border border-teal-500/30 flex items-center gap-2 transition-all cursor-pointer"
+          >
+            <FlaskConical size={15} /> View Diagnostic Labs
+          </button>
+          <button
+            onClick={handleExport}
+            className="btn-primary inline-flex items-center gap-2 cursor-pointer"
           >
             <Download size={15} /> Export Health Summary
           </button>
+        </div>
+      </div>
+
+      {/* ── My Medical Documents (Image 1 Recommended Layout) ───────────── */}
+      <div className="glass p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-white/10 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-teal-600/10 text-teal-400 border border-teal-500/20">
+            <ClipboardList className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-sm font-bold text-white block">My Medical Documents</span>
+            <span className="text-xs text-slate-400">
+              Prescription records, discharge summaries, and clinical diagnostic attachments
+            </span>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5">
+          <button
+            onClick={() => navigate('/patient/prescriptions')}
+            className="px-3.5 py-2 bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-400 border border-emerald-500/30 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Plus size={14} /> Upload Prescription
+          </button>
+
+          <button
+            onClick={() => {
+              const target = selectedRecord || (records.length > 0 ? records[0] : null)
+              if (target?.supporting_document_url) {
+                window.open(target.supporting_document_url, '_blank')
+              } else {
+                toastError('No Document File', 'This record has no external document attachment.')
+              }
+            }}
+            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <FileText size={14} className="text-blue-400" /> View Document
+          </button>
+
+          <button
+            onClick={handleExport}
+            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Download size={14} className="text-teal-400" /> Download
+          </button>
+
+          <button
+            onClick={() => {
+              if (selectedRecord) handleOpenArchive(selectedRecord)
+              else if (records.length > 0) handleOpenArchive(records[0])
+              else toastError('No Record Selected', 'Please select a record to archive.')
+            }}
+            className="px-3.5 py-2 bg-white/5 hover:bg-amber-500/10 text-slate-300 hover:text-amber-300 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Archive size={14} className="text-amber-400" /> Archive
+          </button>
+
+          <button
+            onClick={() => {
+              const el = document.getElementById('record-search-input')
+              if (el) el.focus()
+            }}
+            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Search size={14} className="text-violet-400" /> Search
+          </button>
+        </div>
+      </div>
+
+      {/* ── Action Area (Exact Recommended Layout from Mockup) ───────────── */}
+      <div className="glass p-4 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-white/10 shadow-xl backdrop-blur-md">
+        <div className="flex items-center gap-2.5">
+          <div className="p-2 rounded-xl bg-blue-600/10 text-blue-400 border border-blue-500/20">
+            <FileText className="w-4 h-4" />
+          </div>
+          <div>
+            <span className="text-sm font-bold text-white block">Medical Records</span>
+            <span className="text-xs text-slate-400">
+              {records.length} Verified EHR Records Available
+            </span>
+          </div>
+        </div>
+
+        {/* 4 Core Action Buttons from Mockup: [+ Add Record] [✏ Edit] [🕒 View History] [🗃 Archive] */}
+        <div className="flex flex-wrap items-center gap-2.5">
           <button
             onClick={() => setIsAddModalOpen(true)}
-            className="btn-primary inline-flex items-center gap-2"
+            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-md shadow-emerald-600/20 flex items-center gap-1.5 transition-all cursor-pointer active:scale-95"
           >
-            <Plus size={16} /> Add Record
+            <Plus size={14} /> Add Record
+          </button>
+
+          <button
+            onClick={() => {
+              if (selectedRecord) {
+                handleOpenEdit(selectedRecord)
+              } else if (records.length > 0) {
+                handleOpenEdit(records[0])
+              } else {
+                toastError('No Record Selected', 'Please select a record from the table to edit.')
+              }
+            }}
+            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Edit2 size={14} className="text-blue-400" /> Edit
+          </button>
+
+          <button
+            onClick={() => setIsHistoryModalOpen(true)}
+            className="px-3.5 py-2 bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Clock size={14} className="text-blue-400" /> View History
+          </button>
+
+          <button
+            onClick={() => {
+              if (selectedRecord) {
+                handleOpenArchive(selectedRecord)
+              } else if (records.length > 0) {
+                handleOpenArchive(records[0])
+              } else {
+                toastError('No Record Selected', 'Please select a record from the table to archive.')
+              }
+            }}
+            className="px-3.5 py-2 bg-white/5 hover:bg-amber-500/10 text-slate-300 hover:text-amber-300 border border-white/10 text-xs font-semibold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+          >
+            <Archive size={14} className="text-amber-400" /> Archive
           </button>
         </div>
       </div>
@@ -263,30 +345,47 @@ export default function PatientMedicalRecords() {
       {/* Filter and Search Bar */}
       <div className="glass p-4 rounded-2xl flex flex-col md:flex-row gap-4 items-center justify-between">
         <div className="flex gap-2 w-full md:w-auto overflow-x-auto pb-1 md:pb-0">
-          {['all', 'diagnosis', 'allergy', 'surgery', 'immunization'].map((cat) => (
+          {[
+            { id: 'all', label: 'All Records' },
+            { id: 'diagnosis', label: 'Diagnoses' },
+            { id: 'allergy', label: 'Allergies' },
+            { id: 'surgery', label: 'Surgeries' },
+            { id: 'immunization', label: 'Immunizations' },
+          ].map((cat) => (
             <button
-              key={cat}
-              onClick={() => setSelectedCategory(cat)}
-              className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all whitespace-nowrap ${
-                selectedCategory === cat
+              key={cat.id}
+              onClick={() => setSelectedCategory(cat.id)}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all whitespace-nowrap cursor-pointer ${
+                selectedCategory === cat.id
                   ? 'bg-blue-600 text-white shadow-lg shadow-blue-500/20'
                   : 'bg-white/5 text-slate-400 hover:text-white hover:bg-white/10'
               }`}
             >
-              {cat === 'all' ? 'All Records' : `${cat}s`}
+              {cat.label}
             </button>
           ))}
         </div>
 
-        <div className="relative w-full md:w-72">
-          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Search records, codes..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
-          />
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          <div className="relative w-full md:w-64">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              id="record-search-input"
+              type="text"
+              placeholder="Search conditions, ICD-10, providers..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500/50"
+            />
+          </div>
+
+          <button
+            onClick={() => setIsClearModalOpen(true)}
+            title="Reset Filters / Clear View"
+            className="px-3 py-2 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 border border-white/10 text-xs font-medium transition-colors cursor-pointer shrink-0"
+          >
+            Clear Filters
+          </button>
         </div>
       </div>
 
@@ -299,76 +398,156 @@ export default function PatientMedicalRecords() {
                 <th className="py-3.5 px-5">Category</th>
                 <th className="py-3.5 px-5">Condition / Procedure</th>
                 <th className="py-3.5 px-5">ICD-10 Code</th>
-                <th className="py-3.5 px-5">Verified Date</th>
+                <th className="py-3.5 px-5">Provenance & Source</th>
+                <th className="py-3.5 px-5">Documented Date</th>
                 <th className="py-3.5 px-5">Healthcare Provider</th>
                 <th className="py-3.5 px-5">Status</th>
-                <th className="py-3.5 px-5 text-right">Details</th>
+                <th className="py-3.5 px-5 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-white/5">
-              {filteredRecords.length === 0 ? (
+              {isLoading ? (
                 <tr>
-                  <td colSpan={7} className="py-12 text-center text-slate-500">
+                  <td colSpan={8} className="py-12 text-center text-slate-400">
+                    <RefreshCw className="w-5 h-5 animate-spin mx-auto mb-2 text-blue-400" />
+                    Loading medical records...
+                  </td>
+                </tr>
+              ) : filteredRecords.length === 0 ? (
+                <tr>
+                  <td colSpan={8} className="py-12 text-center text-slate-500">
                     No medical records found matching your filters.
                   </td>
                 </tr>
               ) : (
-                filteredRecords.map((r) => (
-                  <tr
-                    key={r.id}
-                    onClick={() => setSelectedRecord(r)}
-                    className="hover:bg-white/5 transition-colors cursor-pointer group"
-                  >
-                    <td className="py-4 px-5">
-                      <span className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-slate-300">
-                        {getCategoryIcon(r.category)}
-                        {r.category}
-                      </span>
-                    </td>
-                    <td className="py-4 px-5">
-                      <div className="font-semibold text-white group-hover:text-blue-400 transition-colors">
-                        {r.title}
-                      </div>
-                      <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">{r.description}</p>
-                    </td>
-                    <td className="py-4 px-5 font-mono text-xs text-blue-400">
-                      {r.icd10 || '—'}
-                    </td>
-                    <td className="py-4 px-5 text-xs text-slate-300">
-                      <div className="flex items-center gap-1.5">
-                        <Calendar size={13} className="text-slate-500" />
-                        {r.date}
-                      </div>
-                    </td>
-                    <td className="py-4 px-5 text-xs text-slate-300">
-                      {r.provider}
-                    </td>
-                    <td className="py-4 px-5">
-                      <span
-                        className={`text-xs px-2.5 py-1 rounded-full font-medium ${
-                          r.status === 'Chronic' || r.status === 'Active'
-                            ? r.category === 'Allergy'
-                              ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                              : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
-                            : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                        }`}
-                      >
-                        {r.status}
-                      </span>
-                    </td>
-                    <td className="py-4 px-5 text-right">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          setSelectedRecord(r)
-                        }}
-                        className="text-xs text-blue-400 hover:text-blue-300 font-medium inline-flex items-center gap-1"
-                      >
-                        <Info size={14} /> View
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                filteredRecords.map((r) => {
+                  const isPatientEntered = r.is_patient_reported || r.source === 'patient_reported'
+                  const isSelected = selectedRecord?.id === r.id
+
+                  return (
+                    <tr
+                      key={r.id}
+                      onClick={() => setSelectedRecord(r)}
+                      className={`hover:bg-white/5 transition-colors cursor-pointer group ${
+                        isSelected ? 'bg-blue-500/10 border-l-2 border-l-blue-500' : ''
+                      }`}
+                    >
+                      {/* Category */}
+                      <td className="py-4 px-5">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-white/5 border border-white/10 text-slate-300">
+                          {getCategoryIcon(r.category)}
+                          {r.category}
+                        </span>
+                      </td>
+
+                      {/* Condition / Title */}
+                      <td className="py-4 px-5">
+                        <div className="font-semibold text-white group-hover:text-blue-400 transition-colors flex items-center gap-2">
+                          <span>{r.title}</span>
+                          {r.is_amended && (
+                            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30 uppercase tracking-wide">
+                              Amended
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-400 line-clamp-1 mt-0.5">{r.description}</p>
+                        {r.lab_result_id && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate('/patient/labs')
+                            }}
+                            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-teal-400 hover:text-teal-300 transition-colors bg-teal-500/10 px-2 py-0.5 rounded-lg border border-teal-500/20"
+                          >
+                            <FlaskConical size={12} /> View Linked Lab Biomarkers →
+                          </button>
+                        )}
+                      </td>
+
+                      {/* ICD-10 */}
+                      <td className="py-4 px-5 font-mono text-xs text-blue-400">
+                        {r.icd10 || '—'}
+                      </td>
+
+                      {/* Provenance Badge */}
+                      <td className="py-4 px-5">
+                        {isPatientEntered ? (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-300 border border-purple-500/30">
+                            <UserCheck size={11} /> Patient-Reported
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/30">
+                            <ShieldCheck size={11} /> Clinician-Confirmed
+                          </span>
+                        )}
+                      </td>
+
+                      {/* Date */}
+                      <td className="py-4 px-5 text-xs text-slate-300 whitespace-nowrap">
+                        <div className="flex items-center gap-1.5">
+                          <Calendar size={13} className="text-slate-500" />
+                          {r.date}
+                        </div>
+                      </td>
+
+                      {/* Provider */}
+                      <td className="py-4 px-5 text-xs text-slate-300">
+                        {r.provider}
+                      </td>
+
+                      {/* Status */}
+                      <td className="py-4 px-5">
+                        <span
+                          className={`text-xs px-2.5 py-1 rounded-full font-medium ${
+                            r.status === 'Chronic' || r.status === 'Active'
+                              ? (r.category_code === 'allergy' || r.category === 'Allergy')
+                                ? 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                                : 'bg-amber-500/10 text-amber-400 border border-amber-500/20'
+                              : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          }`}
+                        >
+                          {r.status}
+                        </span>
+                      </td>
+
+                      {/* Actions */}
+                      <td className="py-4 px-5 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setSelectedRecord(r)
+                            }}
+                            title="View Record Details"
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-colors"
+                          >
+                            <Info size={14} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleOpenEdit(r)
+                            }}
+                            title="Edit or Amend Record"
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-blue-500/20 text-slate-300 hover:text-blue-400 transition-colors"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleOpenArchive(r)
+                            }}
+                            title="Archive Record"
+                            className="p-1.5 rounded-lg bg-white/5 hover:bg-amber-500/20 text-slate-300 hover:text-amber-400 transition-colors"
+                          >
+                            <Archive size={14} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })
               )}
             </tbody>
           </table>
@@ -378,7 +557,7 @@ export default function PatientMedicalRecords() {
       {/* Record Details Slide-Over / Modal */}
       {selectedRecord && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="glass w-full max-w-lg rounded-2xl p-6 relative border border-white/10 shadow-2xl space-y-5">
+          <div className="glass w-full max-w-lg rounded-3xl p-6 relative border border-white/10 shadow-2xl space-y-4">
             <div className="flex items-start justify-between pb-3 border-b border-white/10">
               <div>
                 <span className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 mb-2">
@@ -394,7 +573,7 @@ export default function PatientMedicalRecords() {
               </button>
             </div>
 
-            <div className="space-y-4 text-sm">
+            <div className="space-y-3.5 text-sm">
               <div className="grid grid-cols-2 gap-3 p-3.5 rounded-xl bg-white/5 border border-white/5">
                 <div>
                   <p className="text-xs text-slate-400">Diagnosis / Event Date</p>
@@ -420,7 +599,7 @@ export default function PatientMedicalRecords() {
 
               <div>
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
-                  Documented Provider
+                  Documented Provider & Facility
                 </h4>
                 <p className="text-white font-medium">{selectedRecord.provider}</p>
               </div>
@@ -429,8 +608,8 @@ export default function PatientMedicalRecords() {
                 <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-1">
                   Clinical Summary & Treatment
                 </h4>
-                <p className="text-slate-300 bg-white/5 p-3 rounded-xl border border-white/5 leading-relaxed">
-                  {selectedRecord.description}
+                <p className="text-slate-300 bg-white/5 p-3 rounded-xl border border-white/5 leading-relaxed text-xs">
+                  {selectedRecord.description || 'No description provided.'}
                 </p>
               </div>
 
@@ -444,19 +623,55 @@ export default function PatientMedicalRecords() {
                   </p>
                 </div>
               )}
+
+              {/* Linked Lab Card */}
+              {selectedRecord.lab_result_id && (
+                <div className="p-3 rounded-xl bg-teal-500/10 border border-teal-500/30 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <FlaskConical className="w-4 h-4 text-teal-400" />
+                    <span className="text-xs font-medium text-teal-200">
+                      Linked Diagnostic Laboratory Biomarkers Available
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setSelectedRecord(null)
+                      navigate('/patient/labs')
+                    }}
+                    className="text-xs font-bold text-teal-400 hover:text-teal-300 flex items-center gap-1 cursor-pointer"
+                  >
+                    View in Labs →
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="flex items-center justify-between pt-3 border-t border-white/10">
-              <button
-                type="button"
-                onClick={() => {
-                  setSelectedRecord(null)
-                  navigate('/patient/reports')
-                }}
-                className="text-xs text-teal-400 hover:text-teal-300 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <FileText size={14} /> Analyze with AI Report Analyzer →
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rec = selectedRecord
+                    setSelectedRecord(null)
+                    handleOpenEdit(rec)
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-white/10 text-slate-200 border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Edit2 size={13} /> Edit / Amend
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const rec = selectedRecord
+                    setSelectedRecord(null)
+                    handleOpenArchive(rec)
+                  }}
+                  className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white/5 hover:bg-amber-500/10 text-amber-300 border border-white/10 flex items-center gap-1.5 transition-all cursor-pointer"
+                >
+                  <Archive size={13} /> Archive
+                </button>
+              </div>
+
               <button
                 onClick={() => setSelectedRecord(null)}
                 className="btn-primary"
@@ -468,111 +683,73 @@ export default function PatientMedicalRecords() {
         </div>
       )}
 
-      {/* Add Record Modal */}
-      {isAddModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="glass w-full max-w-lg rounded-2xl p-6 relative border border-white/10 shadow-2xl space-y-5">
-            <div className="flex items-center justify-between pb-3 border-b border-white/10">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Plus size={18} className="text-blue-400" /> Add Medical Record
-              </h2>
-              <button
-                onClick={() => setIsAddModalOpen(false)}
-                className="text-slate-400 hover:text-white p-1 rounded-lg hover:bg-white/5 transition-all"
-              >
-                <X size={18} />
-              </button>
-            </div>
+      {/* ── Helper Modals ──────────────────────────────────────────────────── */}
+      <AddRecordModal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        onSuccess={(newRec) => {
+          setRecords((prev) => [newRec, ...prev])
+          success('Record Added', `${newRec.title} successfully added to your health record.`)
+        }}
+      />
 
-            <form onSubmit={handleAddRecord} className="space-y-4">
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Record Category
-                </label>
-                <select
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value as MedicalRecordItem['category'])}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50"
-                >
-                  <option value="Diagnosis" className="bg-slate-900 text-white">Diagnosis</option>
-                  <option value="Allergy" className="bg-slate-900 text-white">Allergy</option>
-                  <option value="Surgery" className="bg-slate-900 text-white">Surgery / Procedure</option>
-                  <option value="Immunization" className="bg-slate-900 text-white">Immunization</option>
-                  <option value="Document" className="bg-slate-900 text-white">Clinical Document</option>
-                </select>
-              </div>
+      <EditRecordModal
+        isOpen={isEditModalOpen}
+        record={recordToEdit}
+        onClose={() => {
+          setIsEditModalOpen(false)
+          setRecordToEdit(null)
+        }}
+        onSuccess={(updatedRec) => {
+          setRecords((prev) => prev.map((r) => (r.id === updatedRec.id ? updatedRec : r)))
+          if (selectedRecord?.id === updatedRec.id) {
+            setSelectedRecord(updatedRec)
+          }
+          success('Record Updated', `${updatedRec.title} updated successfully.`)
+        }}
+      />
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Record Title / Condition
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Asthma, Knee Arthroscopy, Tetanus booster"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50 placeholder-slate-500"
-                />
-              </div>
+      <DeleteRecordModal
+        isOpen={isDeleteModalOpen}
+        record={recordToDelete}
+        onClose={() => {
+          setIsDeleteModalOpen(false)
+          setRecordToDelete(null)
+        }}
+        onSuccess={(archivedId) => {
+          setRecords((prev) => prev.filter((r) => r.id !== archivedId))
+          if (selectedRecord?.id === archivedId) {
+            setSelectedRecord(null)
+          }
+          success('Record Archived', 'The medical record was safely archived to your version history.')
+        }}
+      />
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Date Documented
-                  </label>
-                  <input
-                    type="date"
-                    required
-                    value={newDate}
-                    onChange={(e) => setNewDate(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                    Provider / Facility
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="e.g. Dr. Davis or St. Jude"
-                    value={newProvider}
-                    onChange={(e) => setNewProvider(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50 placeholder-slate-500"
-                  />
-                </div>
-              </div>
+      <RecordHistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+        onRecordRestored={() => {
+          loadRecords()
+        }}
+      />
 
-              <div>
-                <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-1.5">
-                  Clinical Summary / Description
-                </label>
-                <textarea
-                  rows={3}
-                  required
-                  placeholder="Details, treatment plan, symptoms, or notes..."
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm focus:outline-none focus:border-blue-500/50 placeholder-slate-500"
-                />
-              </div>
-
-              <div className="flex justify-end gap-3 pt-3 border-t border-white/10">
-                <button
-                  type="button"
-                  onClick={() => setIsAddModalOpen(false)}
-                  className="px-4 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-white hover:bg-white/5 transition-all"
-                >
-                  Cancel
-                </button>
-                <button type="submit" className="btn-primary">
-                  Save Record
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <ClearRecordHistoryModal
+        isOpen={isClearModalOpen}
+        onClose={() => setIsClearModalOpen(false)}
+        onSuccess={(mode) => {
+          if (mode === 'clear_filters') {
+            setSearchQuery('')
+            setSelectedCategory('all')
+            success('Filters Reset', 'Active search filters have been cleared.')
+          } else if (mode === 'hide_archived') {
+            setShowArchived(false)
+            loadRecords()
+            success('View Updated', 'Archived records are hidden from view.')
+          } else {
+            success('Request Submitted', 'Archival review request submitted to Health Information Management.')
+          }
+        }}
+      />
     </div>
   )
 }

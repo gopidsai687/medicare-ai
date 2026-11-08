@@ -34,6 +34,9 @@ class DeviceProtocol(str, enum.Enum):
 class DeviceStatus(str, enum.Enum):
     CONNECTED = "CONNECTED"
     DISCONNECTED = "DISCONNECTED"
+    CONNECTING = "CONNECTING"
+    CONNECTION_FAILED = "CONNECTION_FAILED"
+    SIMULATION_MODE = "SIMULATION_MODE"
     STREAMING = "STREAMING"
     SIGNAL_POOR = "SIGNAL_POOR"
     CALIBRATING = "CALIBRATING"
@@ -47,6 +50,9 @@ class SignalQuality(str, enum.Enum):
     MOTION_ARTIFACT = "MOTION_ARTIFACT"       # High-frequency motion disruption detected by accelerometer
     EXCESSIVE_PRESSURE = "EXCESSIVE_PRESSURE" # Contact force > 2.5 N occluding capillary beds
     INSUFFICIENT_CONTACT = "INSUFFICIENT_CONTACT" # Contact force < 0.3 N, ambient light leakage
+    LEADS_OFF = "LEADS_OFF"                   # Biosensor detached or leads disconnected
+    CALIBRATION_REQUIRED = "CALIBRATION_REQUIRED"
+    PACKET_CORRUPTED = "PACKET_CORRUPTED"
 
 
 class MedicalDevice(UUIDMixin, TimestampMixin, Base):
@@ -92,11 +98,15 @@ class MedicalDevice(UUIDMixin, TimestampMixin, Base):
 
     last_heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     last_reading_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_connected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    connection_protocol_details: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    device_secret_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
     mac_or_device_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
     telemetry_packets = relationship("DeviceTelemetryPacket", back_populates="device", cascade="all, delete-orphan", lazy="select")
+    events = relationship("DeviceConnectionEvent", back_populates="device", cascade="all, delete-orphan", lazy="select")
 
 
 class DeviceTelemetryPacket(UUIDMixin, TimestampMixin, Base):
@@ -119,6 +129,7 @@ class DeviceTelemetryPacket(UUIDMixin, TimestampMixin, Base):
         index=True,
     )
     packet_timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    sequence_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
     
     # Direct Physiological Measurements
     heart_rate: Mapped[int | None] = mapped_column(Integer, nullable=True)               # bpm (direct peak-to-peak)
@@ -132,14 +143,37 @@ class DeviceTelemetryPacket(UUIDMixin, TimestampMixin, Base):
     diastolic_bp: Mapped[int | None] = mapped_column(Integer, nullable=True)             # mmHg
     blood_glucose: Mapped[float | None] = mapped_column(Float, nullable=True)            # mg/dL (blocked for pure optical)
 
-    # Signal Diagnostics & Quality Control
+    # Signal Diagnostics, Security & Quality Control
     signal_quality: Mapped[str] = mapped_column(String(40), default=SignalQuality.OPTIMAL.value, nullable=False)
     snr_db: Mapped[float | None] = mapped_column(Float, nullable=True)                   # Signal-to-Noise Ratio (dB)
+    sensor_status: Mapped[str | None] = mapped_column(String(60), default="SENSOR_OK", nullable=True)
+    source_type: Mapped[str] = mapped_column(String(40), default="HARDWARE", nullable=False) # HARDWARE vs SIMULATION
     provenance: Mapped[str] = mapped_column(String(40), default=MeasurementProvenance.MEASURED_DEVICE.value, nullable=False)
     packet_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
+    auth_signature: Mapped[str | None] = mapped_column(String(128), nullable=True)       # HMAC-SHA256 signature
+    auth_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_sample: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     validation_status: Mapped[str] = mapped_column(String(30), default="VALID", nullable=False)
     validation_notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     device = relationship("MedicalDevice", foreign_keys=[device_id], back_populates="telemetry_packets")
     patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
+
+
+class DeviceConnectionEvent(UUIDMixin, TimestampMixin, Base):
+    """
+    Audit log of device connection, disconnection, security, and calibration lifecycle events.
+    """
+    __tablename__ = "device_connection_events"
+
+    device_id: Mapped[uuid.UUID] = mapped_column(
+        UUIDType(),
+        ForeignKey("medical_devices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    event_type: Mapped[str] = mapped_column(String(60), nullable=False) # CONNECT, DISCONNECT, CONNECT_FAILED, REPLAY_BLOCKED, CALIBRATED, SENSOR_FAULT
+    details: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+    device = relationship("MedicalDevice", foreign_keys=[device_id], back_populates="events")

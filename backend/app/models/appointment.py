@@ -5,7 +5,7 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String, Text
+from sqlalchemy import DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from app.models.base import UUIDType
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -69,9 +69,29 @@ class Appointment(UUIDMixin, TimestampMixin, Base):
     cancellation_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     rescheduled_from_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType(), nullable=True)
 
+    # Department & Consultation Metadata
+    department_id: Mapped[uuid.UUID | None] = mapped_column(UUIDType(), nullable=True)
+    department_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    consultation_fee: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Patient Contact & Clinical History Fields
+    patient_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    patient_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    patient_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    patient_dob: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    existing_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    current_medications: Mapped[str | None] = mapped_column(Text, nullable=True)
+    allergies: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Referral Tracking
+    referral_source: Mapped[str | None] = mapped_column(String(100), default="self_referral", nullable=True)
+    referring_doctor_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    referring_doctor_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    referring_doctor_email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
     # Relationships
     patient = relationship("Patient", foreign_keys=[patient_id], lazy="selectin")
     doctor = relationship("Doctor", foreign_keys=[doctor_id], lazy="selectin")
 
     def __repr__(self) -> str:
-        return f"<Appointment id={self.id} status={self.status} scheduled_at={self.scheduled_at}>"
+        return f"<Appointment id={self.id} ref={self.booking_reference} status={self.status} scheduled_at={self.scheduled_at}>"

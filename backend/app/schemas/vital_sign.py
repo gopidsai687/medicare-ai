@@ -429,12 +429,213 @@ class BodyMapIndicator(BaseModel):
     guidance: Optional[str] = None
     active_alert_count: int = 0
 
+    # Extended attributes for complete client & clinical dashboard alignment
+    system_name: Optional[str] = None
+    label: Optional[str] = None
+    status_label: Optional[str] = None
+    latest_value: Optional[str] = None
+    latest_unit: Optional[str] = None
+    recorded_at: Optional[datetime] = None
+    measurement_type: Optional[str] = None
+    is_sample: bool = False
+    history_count: int = 0
+    history_points: List[Dict[str, Any]] = Field(default_factory=list)
+    trend: str = "insufficient_data"  # 'improving', 'stable', 'deteriorating', 'insufficient_data'
+    clinical_summary: Optional[str] = None
+    urgency_level: str = "none"  # 'none', 'low', 'moderate', 'high', 'critical'
+    target_page: Optional[str] = None
+
 
 class BodyMapResponse(BaseModel):
     patient_id: uuid.UUID
     evaluated_at: datetime
-    overall_health_status: str  # stable, attention_needed, urgent_care_recommended
+    overall_health_status: str  # within_target_band, attention_needed, urgent_care_recommended, stale_monitoring, no_data
+    overall_status: Optional[str] = None
     indicators: Dict[str, BodyMapIndicator]
     educational_disclaimer: str
     disclaimer: Optional[str] = None
+
+
+# ---------------------------------------------------------
+# Dedicated Blood Glucose & Blood Pressure Entities
+# ---------------------------------------------------------
+class BloodPressureCreateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    systolic: int = Field(..., ge=40, le=280, description="Systolic blood pressure in mmHg")
+    diastolic: int = Field(..., ge=30, le=180, description="Diastolic blood pressure in mmHg")
+    pulse: Optional[int] = Field(None, ge=30, le=240, description="Pulse rate in BPM")
+    unit: str = Field("mmHg", max_length=10)
+    measured_at: Optional[datetime] = None
+    source_type: str = Field("manual_entry", max_length=50)  # manual_entry, bluetooth_device, ehr_import
+    device_name: Optional[str] = Field(None, max_length=100)
+    device_identifier: Optional[str] = Field(None, max_length=100)
+    device_connection_id: Optional[uuid.UUID] = None
+    external_reading_id: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class BloodGlucoseCreateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    glucose_value: float = Field(..., ge=0.5, le=800.0, description="Quantitative glucose value (mg/dL or mmol/L)")
+    unit: str = Field("mg/dL", max_length=10)  # mg/dL or mmol/L
+    glucose_context: str = Field("fasting", max_length=50)  # fasting, before_meal, after_meal, bedtime, other
+    measured_at: Optional[datetime] = None
+    source_type: str = Field("manual_entry", max_length=50)  # manual_entry, bluetooth_device, cgm_import
+    device_name: Optional[str] = Field(None, max_length=100)
+    device_identifier: Optional[str] = Field(None, max_length=100)
+    device_connection_id: Optional[uuid.UUID] = None
+    external_reading_id: Optional[str] = Field(None, max_length=100)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class GlucoseMeasurementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    glucose_value: float
+    glucose_value_mmol: float
+    unit: str = "mg/dL"
+    glucose_context: str = "fasting"
+    measured_at: datetime
+    source_type: str = "manual_entry"
+    device_name: Optional[str] = None
+    device_identifier: Optional[str] = None
+    device_connection_id: Optional[uuid.UUID] = None
+    external_reading_id: Optional[str] = None
+    reading_hash: Optional[str] = None
+    notes: Optional[str] = None
+    is_sample: bool = False
+    created_at: datetime
+    category: Optional[str] = None
+
+
+class BloodPressureMeasurementRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    systolic: int
+    diastolic: int
+    pulse: Optional[int] = None
+    unit: str = "mmHg"
+    measured_at: datetime
+    source_type: str = "manual_entry"
+    device_name: Optional[str] = None
+    device_identifier: Optional[str] = None
+    device_connection_id: Optional[uuid.UUID] = None
+    external_reading_id: Optional[str] = None
+    reading_hash: Optional[str] = None
+    notes: Optional[str] = None
+    is_sample: bool = False
+    created_at: datetime
+    bp_category: Optional[str] = None
+    mean_arterial_pressure: Optional[float] = None
+
+
+class DeviceConnectionCreate(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    device_name: str = Field(..., max_length=120)
+    device_type: str = Field(..., max_length=60)  # blood_pressure_monitor, glucose_meter, cgm, pulse_monitor
+    manufacturer: Optional[str] = Field(None, max_length=100)
+    model_number: Optional[str] = Field(None, max_length=80)
+    serial_number: Optional[str] = Field(None, max_length=100)
+    mac_address: Optional[str] = Field(None, max_length=100)
+    connection_protocol: str = Field("bluetooth_le", max_length=40)
+    battery_level: Optional[int] = Field(None, ge=0, le=100)
+    firmware_version: Optional[str] = Field(None, max_length=50)
+    hardware_version: Optional[str] = Field(None, max_length=50)
+    notes: Optional[str] = Field(None, max_length=500)
+
+
+class DeviceConnectionRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    device_name: str
+    device_type: str
+    manufacturer: Optional[str] = None
+    model_number: Optional[str] = None
+    serial_number: Optional[str] = None
+    mac_address: Optional[str] = None
+    connection_protocol: str
+    status: str
+    battery_level: Optional[int] = None
+    firmware_version: Optional[str] = None
+    hardware_version: Optional[str] = None
+    last_synced_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+
+class DeviceReadingItem(BaseModel):
+    reading_type: str = Field(..., description="blood_pressure, glucose, or heart_rate")
+    measured_at: Optional[datetime] = None
+    external_reading_id: Optional[str] = None
+    # BP fields
+    systolic: Optional[int] = None
+    diastolic: Optional[int] = None
+    pulse: Optional[int] = None
+    # Glucose fields
+    glucose_value: Optional[float] = None
+    unit: Optional[str] = "mg/dL"
+    glucose_context: Optional[str] = "fasting"
+    # Heart rate fields
+    heart_rate: Optional[int] = None
+    notes: Optional[str] = None
+
+
+class DeviceTelemetrySyncRequest(BaseModel):
+    device_identifier: Optional[str] = None
+    device_name: Optional[str] = None
+    readings: List[DeviceReadingItem] = Field(..., min_length=1)
+
+
+class DeviceSyncResponse(BaseModel):
+    device_id: Optional[uuid.UUID] = None
+    device_name: str
+    synced_count: int
+    duplicate_count: int
+    error_count: int
+    synced_at: datetime
+    message: str
+    records: List[Dict[str, Any]] = []
+
+
+class DeviceReadingSyncRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
+
+    id: uuid.UUID
+    patient_id: uuid.UUID
+    device_connection_id: Optional[uuid.UUID] = None
+    device_name: str
+    device_identifier: Optional[str] = None
+    reading_type: str
+    external_reading_id: Optional[str] = None
+    reading_hash: str
+    reading_timestamp: datetime
+    status: str
+    measurement_id: Optional[uuid.UUID] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+
+class SmartDashboardSummary(BaseModel):
+    latest_glucose: Optional[Dict[str, Any]] = None
+    latest_blood_pressure: Optional[Dict[str, Any]] = None
+    latest_pulse: Optional[Dict[str, Any]] = None
+    weekly_averages: Dict[str, Any] = {}
+    monthly_averages: Dict[str, Any] = {}
+    missing_indicators: List[Dict[str, Any]] = []
+    recent_history: List[Dict[str, Any]] = []
+    provenance_summary: Dict[str, int] = {}
+    clinical_disclaimer: str = (
+        "Fingerprint animation and webcams are non-diagnostic visual and research tools. "
+        "All diagnostic blood pressure measurements require occlusive pneumatic cuffs, and "
+        "glucose measurements require certified enzymatic capillary or CGM sensors."
+    )
 

@@ -24,6 +24,7 @@ from fastapi import (
     UploadFile,
     status,
 )
+from fastapi.responses import FileResponse
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -416,10 +417,97 @@ async def confirm_extracted_items(
         db.add(item_record)
         confirmed_items.append(item_record)
 
+        # Synchronize into shared central Prescriptions table
+        rx_check = select(Prescription).where(
+            Prescription.patient_id == patient.id,
+            Prescription.upload_id == upload.id,
+            Prescription.medication_name == item_record.medication_name,
+        )
+        existing_rx = (await db.execute(rx_check)).scalar_one_or_none()
+        if not existing_rx:
+            doc_url = f"/api/v1/prescription-analysis/uploads/{upload.id}/file" if not upload.is_manual_entry else None
+            new_rx = Prescription(
+                id=uuid.uuid4(),
+                patient_id=patient.id,
+                medication_name=item_record.medication_name,
+                strength=item_record.strength,
+                dosage=item_record.dosage or item_record.strength or "As prescribed",
+                frequency=item_record.frequency or "Daily",
+                route=item_record.route or "Oral",
+                start_date=datetime.now(timezone.utc).date(),
+                instructions=item_record.instructions,
+                status=PrescriptionStatus.ACTIVE,
+                source="ocr_upload" if not upload.is_manual_entry else "patient_manual",
+                is_patient_reported=True,
+                is_verified=True,
+                verified_at=datetime.now(timezone.utc),
+                upload_id=upload.id,
+                document_name=upload.file_name,
+                document_url=doc_url,
+                created_by=current_user.id,
+            )
+            db.add(new_rx)
+
     upload.status = UploadStatus.CONFIRMED
+
+    # Synchronize into My Medical Documents if a physical document was uploaded
+    if not upload.is_manual_entry:
+        doc_url = f"/api/v1/prescription-analysis/uploads/{upload.id}/file"
+        doc_stmt = select(MedicalRecord).where(
+            MedicalRecord.patient_id == patient.id,
+            MedicalRecord.supporting_document_url == doc_url,
+        )
+        existing_doc = (await db.execute(doc_stmt)).scalar_one_or_none()
+        if not existing_doc:
+            med_list_str = ", ".join(it.medication_name for it in confirmed_items)
+            doc_rec = MedicalRecord(
+                id=uuid.uuid4(),
+                patient_id=patient.id,
+                category=RecordCategory.OTHER,
+                title=f"Prescription Document: {upload.file_name}",
+                description=f"Prescription document containing verified medications: {med_list_str}",
+                record_date=datetime.now(timezone.utc).date(),
+                status=RecordStatus.ACTIVE,
+                provider="Prescription Intake",
+                source="prescription_document",
+                is_patient_reported=True,
+                supporting_document_url=doc_url,
+                notes=f"Linked to Prescription Upload ID: {upload.id}",
+                created_by=current_user.id,
+            )
+            db.add(doc_rec)
+
     await db.commit()
 
     return confirmed_items
+
+
+@router.get("/uploads/{upload_id}/file")
+async def download_prescription_file(
+    upload_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Serve uploaded prescription document file with access control."""
+    stmt = select(PrescriptionUpload).where(PrescriptionUpload.id == upload_id)
+    res = await db.execute(stmt)
+    upload = res.scalar_one_or_none()
+    if not upload:
+        raise HTTPException(status_code=404, detail="Prescription document not found")
+
+    if current_user.role == UserRole.PATIENT:
+        patient = await _get_or_create_patient(db, current_user)
+        if upload.patient_id != patient.id:
+            raise HTTPException(status_code=403, detail="Unauthorized access to this document.")
+
+    if not os.path.exists(upload.storage_path):
+        raise HTTPException(status_code=404, detail="Physical document file missing on server.")
+
+    return FileResponse(
+        upload.storage_path,
+        media_type=upload.file_type,
+        filename=upload.file_name,
+    )
 
 
 # ── 4. AI Prescription Analysis Execution ────────────────────────────────────
@@ -508,6 +596,15 @@ async def analyze_prescription(
             is_active=True,
         )
         db.add(reminder)
+
+    # Link analysis report ID to prescriptions associated with this upload
+    rx_update_stmt = select(Prescription).where(
+        Prescription.patient_id == patient.id,
+        Prescription.upload_id == upload.id,
+    )
+    rx_res = await db.execute(rx_update_stmt)
+    for rx_item in rx_res.scalars().all():
+        rx_item.analysis_report_id = report.id
 
     # Audit log
     audit = AuditLog(

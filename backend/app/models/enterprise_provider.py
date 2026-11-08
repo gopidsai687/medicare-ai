@@ -106,12 +106,104 @@ class Department(Base):
     locn_nm: Mapped[str | None] = mapped_column(String(150), nullable=True)
     phone_num: Mapped[str | None] = mapped_column(String(30), nullable=True)
     dept_sts_cd: Mapped[str] = mapped_column(String(20), default="ACTIVE")
+    icon_nm: Mapped[str | None] = mapped_column(String(50), default="Stethoscope", nullable=True)
+    email_addr: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    head_of_dept: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    dr_count: Mapped[int | None] = mapped_column(Integer, default=1, nullable=True)
 
     crte_dt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updt_dt: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
 
     doctors = relationship("DoctorDetails", back_populates="department")
     rooms = relationship("FacilityRoom", back_populates="department")
+
+    @property
+    def id(self) -> uuid.UUID:
+        return self.dept_id
+
+    @id.setter
+    def id(self, val: uuid.UUID) -> None:
+        self.dept_id = val
+
+    @property
+    def name(self) -> str:
+        return self.dept_nm
+
+    @name.setter
+    def name(self, val: str) -> None:
+        self.dept_nm = val
+
+    @property
+    def code(self) -> str:
+        return self.dept_cd
+
+    @code.setter
+    def code(self, val: str) -> None:
+        self.dept_cd = val
+
+    @property
+    def description(self) -> str:
+        return self.dept_dscrptn or f"Specialized medical services in {self.dept_nm}."
+
+    @description.setter
+    def description(self, val: str | None) -> None:
+        self.dept_dscrptn = val
+
+    @property
+    def icon(self) -> str:
+        return self.icon_nm or "Stethoscope"
+
+    @icon.setter
+    def icon(self, val: str | None) -> None:
+        self.icon_nm = val
+
+    @property
+    def location(self) -> str:
+        return self.locn_nm or "Main Medical Pavilion"
+
+    @location.setter
+    def location(self, val: str | None) -> None:
+        self.locn_nm = val
+
+    @property
+    def phone(self) -> str:
+        return self.phone_num or "(555) 019-2800"
+
+    @phone.setter
+    def phone(self, val: str | None) -> None:
+        self.phone_num = val
+
+    @property
+    def email(self) -> str | None:
+        return self.email_addr
+
+    @email.setter
+    def email(self, val: str | None) -> None:
+        self.email_addr = val
+
+    @property
+    def head_of_department(self) -> str | None:
+        return self.head_of_dept
+
+    @head_of_department.setter
+    def head_of_department(self, val: str | None) -> None:
+        self.head_of_dept = val
+
+    @property
+    def doctor_count(self) -> int:
+        return self.dr_count or 1
+
+    @doctor_count.setter
+    def doctor_count(self, val: int | None) -> None:
+        self.dr_count = val
+
+    @property
+    def is_active(self) -> bool:
+        return self.dept_sts_cd == "ACTIVE"
+
+    @is_active.setter
+    def is_active(self, val: bool) -> None:
+        self.dept_sts_cd = "ACTIVE" if val else "INACTIVE"
 
 
 class MedicalSpecialty(Base):
