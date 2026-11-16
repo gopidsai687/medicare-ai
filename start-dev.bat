@@ -71,7 +71,7 @@ set /a attempts=0
 :WAIT_FRONTEND_LOOP
 timeout /t 1 /nobreak >nul
 set /a attempts+=1
-powershell -Command "try { $res = Invoke-WebRequest -Uri 'http://localhost:5173/' -TimeoutSec 2; if ($res.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -Command "try { $res = Invoke-WebRequest -Uri 'http://localhost:5173/' -UseBasicParsing -TimeoutSec 2; if ($res.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 if %errorlevel% equ 0 (
     echo [OK] Frontend is ready and responding at http://localhost:5173/
     goto READY

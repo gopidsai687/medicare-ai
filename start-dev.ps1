@@ -53,7 +53,7 @@ Start-Process powershell -ArgumentList "-NoExit", "-Command", "$backendCmd"
 
 # 5. Start Vite Frontend in new window
 Write-Host "[*] Launching Vite Frontend on http://localhost:5173 with hot-reload..." -ForegroundColor Green
-$frontendCmd = "cd '$rootPath\frontend'; npm run dev"
+$frontendCmd = "cd '$rootPath\frontend'; cmd /c npm run dev"
 Start-Process powershell -ArgumentList "-NoExit", "-Command", "$frontendCmd"
 
 Write-Host ""
@@ -79,7 +79,7 @@ for ($i = 1; $i -le 15; $i++) {
 for ($i = 1; $i -le 10; $i++) {
     Start-Sleep -Seconds 1
     try {
-        $res = Invoke-WebRequest -Uri "http://localhost:5173/" -TimeoutSec 2
+        $res = Invoke-WebRequest -Uri "http://localhost:5173/" -UseBasicParsing -TimeoutSec 2
         if ($res.StatusCode -eq 200) {
             Write-Host "[OK] Frontend is ready and responding at http://localhost:5173/" -ForegroundColor Green
             break

@@ -146,21 +146,19 @@ export function OverviewDashboardCards({
           <div className="flex items-center p-1 rounded-xl bg-slate-900 border border-slate-800">
             <button
               onClick={() => setTimeframe('monthly')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
-                timeframe === 'monthly'
-                  ? 'bg-slate-800 text-cyan-300 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${timeframe === 'monthly'
+                ? 'bg-slate-800 text-cyan-300 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+                }`}
             >
               Monthly
             </button>
             <button
               onClick={() => setTimeframe('weekly')}
-              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${
-                timeframe === 'weekly'
-                  ? 'bg-slate-800 text-cyan-300 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer transition-all ${timeframe === 'weekly'
+                ? 'bg-slate-800 text-cyan-300 shadow-sm'
+                : 'text-slate-400 hover:text-slate-200'
+                }`}
             >
               Weekly
             </button>
@@ -194,11 +192,10 @@ export function OverviewDashboardCards({
             </div>
 
             <div className="mt-2 flex items-center gap-2">
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                glucoseStatus === 'No Data'
-                  ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                  : 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
-              }`}>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${glucoseStatus === 'No Data'
+                ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                : 'bg-teal-500/15 text-teal-300 border border-teal-500/30'
+                }`}>
                 {glucoseStatus}
               </span>
               <span className="text-[10px] text-slate-400 flex items-center gap-1">
@@ -265,11 +262,10 @@ export function OverviewDashboardCards({
             </div>
 
             <div className="mt-2 flex items-center gap-2">
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                pulseStatus === 'No Data'
-                  ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                  : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
-              }`}>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${pulseStatus === 'No Data'
+                ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                : 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30'
+                }`}>
                 {pulseStatus}
               </span>
               <span className="text-[10px] text-slate-400 flex items-center gap-1">
@@ -337,11 +333,10 @@ export function OverviewDashboardCards({
             </div>
 
             <div className="mt-2 flex items-center gap-2">
-              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                bpStatus === 'No Data'
-                  ? 'bg-slate-800 text-slate-400 border border-slate-700'
-                  : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
-              }`}>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${bpStatus === 'No Data'
+                ? 'bg-slate-800 text-slate-400 border border-slate-700'
+                : 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/30'
+                }`}>
                 {bpStatus}
               </span>
               <span className="text-[10px] text-slate-400 flex items-center gap-1">
