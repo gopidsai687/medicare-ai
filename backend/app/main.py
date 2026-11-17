@@ -15,7 +15,7 @@ from app.models.base import Base
 from app.api.v1 import (
     auth, users, appointments, records, prescriptions, vitals,
     encounters, mpi, audit_logs, ai, labs, departments, patients,
-    prescription_analysis, medical_report_analysis, devices,
+    prescription_analysis, medical_report_analysis, devices, device_station,
 )
 
 log = structlog.get_logger(__name__)
@@ -153,6 +153,7 @@ app.include_router(patients.router, prefix="/api/v1")
 app.include_router(prescription_analysis.router, prefix="/api/v1")
 app.include_router(medical_report_analysis.router, prefix="/api/v1")
 app.include_router(devices.router, prefix="/api/v1")
+app.include_router(device_station.router, prefix="/api/v1")
 
 
 # ── Health Endpoints ──────────────────────────────────────────────────────────

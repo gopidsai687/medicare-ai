@@ -48,6 +48,7 @@ import {
   OverviewTelemetryData,
 } from '@/components/vitals/OverviewDashboardCards'
 import { DeviceConnectionCenter } from '@/components/vitals/DeviceConnectionCenter'
+import { ConnectedHealthOverview } from '@/components/vitals/ConnectedHealthOverview'
 
 export interface VitalSignRecord {
   id: string
@@ -435,6 +436,9 @@ export default function VitalSense() {
           </div>
         </div>
       </div>
+
+      {/* ── 1.5. Your Connected Health Overview (Wearables & Smartwatches) ─────── */}
+      <ConnectedHealthOverview />
 
       {/* ── 2. Side-by-Side: VitalSense Fingerprint Screen + Health Monitoring Dashboard (Recommended Final Design) ── */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-stretch">

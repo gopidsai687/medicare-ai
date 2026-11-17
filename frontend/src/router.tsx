@@ -24,6 +24,7 @@ const PatientBloodGlucose = lazyWithRetry(() => import('@/pages/patient/BloodGlu
 const PatientNearbyHospitals = lazyWithRetry(() => import('@/pages/patient/NearbyHospitals'), 'PatientNearbyHospitals')
 const PatientHealthProfile = lazyWithRetry(() => import('@/pages/patient/PatientHealthProfile'), 'PatientHealthProfile')
 const PatientPPGResearch = lazyWithRetry(() => import('@/pages/patient/PPGResearch'), 'PatientPPGResearch')
+const PatientDeviceStation = lazyWithRetry(() => import('@/pages/patient/DeviceStation'), 'PatientDeviceStation')
 const PatientDeviceConnections = lazyWithRetry(() => import('@/pages/patient/DeviceConnections'), 'PatientDeviceConnections')
 const PatientSettings = lazyWithRetry(() => import('@/pages/patient/Settings'), 'PatientSettings')
 
@@ -99,7 +100,8 @@ export const router = createBrowserRouter([
           { path: '/patient/hospitals', element: withSuspense(PatientNearbyHospitals), errorElement: <RouteErrorBoundary /> },
           { path: '/patient/profile', element: withSuspense(PatientHealthProfile), errorElement: <RouteErrorBoundary /> },
           { path: '/patient/vitalsense/research', element: withSuspense(PatientPPGResearch), errorElement: <RouteErrorBoundary /> },
-          { path: '/patient/devices', element: withSuspense(PatientDeviceConnections), errorElement: <RouteErrorBoundary /> },
+          { path: '/patient/devices', element: withSuspense(PatientDeviceStation), errorElement: <RouteErrorBoundary /> },
+          { path: '/patient/devices/laboratory', element: withSuspense(PatientDeviceConnections), errorElement: <RouteErrorBoundary /> },
           { path: '/patient/settings', element: withSuspense(PatientSettings), errorElement: <RouteErrorBoundary /> },
         ],
       },

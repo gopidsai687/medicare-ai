@@ -41,12 +41,12 @@ interface NavItem {
 const PATIENT_NAV: NavItem[] = [
   { to: '/patient', icon: Home, label: 'Dashboard' },
   { to: '/patient/vitalsense', icon: Heart, label: 'MediCare VitalSense' },
+  { to: '/patient/devices', icon: Cpu, label: 'Device Station' },
   { to: '/patient/vitalsense/blood-pressure', icon: Gauge, label: 'Blood Pressure' },
   { to: '/patient/vitalsense/blood-glucose', icon: Droplet, label: 'Blood Glucose' },
   { to: '/patient/hospitals', icon: MapPin, label: 'Emergency & Hospitals' },
   { to: '/patient/profile', icon: User, label: 'Health Timeline' },
   { to: '/patient/vitalsense/research', icon: Microscope, label: 'PPG Research Lab' },
-  { to: '/patient/devices', icon: Cpu, label: 'Device Station' },
   { to: '/patient/prescriptions', icon: Pill, label: 'Prescription Analyzer' },
   { to: '/patient/reports', icon: FileSearch, label: 'Medical Report Analyzer' },
   { to: '/patient/analyses', icon: Sparkles, label: 'Previous AI Analyses' },

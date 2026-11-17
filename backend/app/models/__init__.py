@@ -51,6 +51,16 @@ from app.models.medical_device import (
     DeviceStatus,
     SignalQuality,
 )
+from app.models.connected_device import (
+    ConnectedDevice,
+    ConnectedDeviceType,
+    ConnectedDeviceStatus,
+    MeasurementCategory,
+    HealthMeasurement,
+    DeviceSyncHistory,
+    HealthPermission,
+    HealthNotification,
+)
 
 # Enterprise Standard Models (53 Healthcare Canonical Entities)
 from app.models.enterprise_patient import (

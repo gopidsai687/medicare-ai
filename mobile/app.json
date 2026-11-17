@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "MediCare AI",
+    "slug": "medicare-ai-mobile",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#071120"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "ai.medicare.mobile",
+      "entitlements": {
+        "com.apple.developer.healthkit": true,
+        "com.apple.developer.healthkit.access": []
+      },
+      "infoPlist": {
+        "NSHealthShareUsageDescription": "MediCare AI requires read access to Apple Health and Apple Watch telemetry (Heart rate, resting HR, SpO2, sleep stages, steps, and temperature) to populate your VitalSense dashboard.",
+        "NSHealthUpdateUsageDescription": "MediCare AI may synchronize verified prescription intake and vital sign records with Apple Health.",
+        "UIBackgroundModes": ["fetch", "processing"]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#071120"
+      },
+      "package": "ai.medicare.mobile",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.health.READ_HEART_RATE",
+        "android.permission.health.READ_RESTING_HEART_RATE",
+        "android.permission.health.READ_STEPS",
+        "android.permission.health.READ_SLEEP",
+        "android.permission.health.READ_OXYGEN_SATURATION",
+        "android.permission.health.READ_BLOOD_PRESSURE",
+        "android.permission.health.READ_BLOOD_GLUCOSE",
+        "android.permission.health.READ_RESPIRATORY_RATE",
+        "android.permission.health.READ_BODY_TEMPERATURE"
+      ]
+    },
+    "extra": {
+      "apiBaseUrl": "https://medicare-ai-iv31.onrender.com"
+    }
+  }
+}
